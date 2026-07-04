@@ -49,6 +49,50 @@ class LLMIdentification(BaseModel):
     candidates: list[LLMPlantCandidate]
 
 
+class ConsolidatedCandidate(BaseModel):
+    """A reconciled candidate produced by comparing both engines."""
+
+    scientific_name: str
+    common_name: Optional[str] = None
+    family: Optional[str] = None
+    genus: Optional[str] = None
+    confidence: float = Field(description="Consolidated confidence 0..1", ge=0, le=1)
+    agreed_by_both: bool = Field(
+        description="True when both Pl@ntNet and the vision model proposed this species"
+    )
+    note: Optional[str] = Field(
+        default=None, description="Short reasoning about agreement/disagreement"
+    )
+
+
+class Consolidation(BaseModel):
+    summary: str = Field(description="One-sentence summary of the consensus")
+    candidates: list[ConsolidatedCandidate]
+
+
+_CONSOLIDATE_PROMPT = (
+    "You are an expert botanist acting as a referee. Two independent plant "
+    "identification engines analysed the SAME photo(s): 'Pl@ntNet' (a specialised "
+    "plant-ID model) and an AI vision model. Their candidate lists are given below "
+    "with confidence scores. Using the photos AND both lists, produce a single "
+    "consolidated, de-duplicated ranking of the most likely species. Prefer species "
+    "that BOTH engines agree on and raise their confidence; keep strong single-engine "
+    "candidates but reflect the uncertainty. For each final candidate set "
+    "'agreed_by_both' correctly, give a consolidated confidence 0..1, and a short note. "
+    "Also give a one-sentence summary of the consensus."
+)
+
+
+def _image_content(images: list[tuple[bytes, str]]) -> list[dict]:
+    content: list[dict] = []
+    for data, content_type in images:
+        b64 = base64.b64encode(data).decode("ascii")
+        content.append(
+            {"type": "input_image", "image_url": f"data:{content_type};base64,{b64}"}
+        )
+    return content
+
+
 async def identify_with_openai(
     images: list[tuple[bytes, str]],
     *,
@@ -81,3 +125,34 @@ async def identify_with_openai(
     if parsed is None:
         return LLMIdentification(candidates=[])
     return parsed
+
+
+async def consolidate_with_openai(
+    images: list[tuple[bytes, str]],
+    plantnet_summary: str,
+    openai_summary: str,
+    *,
+    api_key: str,
+    model: str,
+) -> Consolidation:
+    """Reconcile the two engines' candidate lists into a final ranking."""
+    client = AsyncOpenAI(api_key=api_key)
+
+    text = (
+        f"{_CONSOLIDATE_PROMPT}\n\n"
+        f"Pl@ntNet candidates: {plantnet_summary}\n"
+        f"AI vision candidates: {openai_summary}\n"
+    )
+    content: list[dict] = [{"type": "input_text", "text": text}]
+    content.extend(_image_content(images))
+
+    response = await client.responses.parse(
+        model=model,
+        input=[{"role": "user", "content": content}],
+        text_format=Consolidation,
+    )
+    parsed = response.output_parsed
+    if parsed is None:
+        return Consolidation(summary="", candidates=[])
+    return parsed
+

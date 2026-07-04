@@ -30,6 +30,17 @@ http.interceptors.request.use(async (config) => {
   return config;
 });
 
+// Auth headers for non-axios calls (e.g. fetch streaming).
+export async function authHeaders(): Promise<Record<string, string>> {
+  if (tokenProvider) {
+    const token = await tokenProvider();
+    if (token) return { Authorization: `Bearer ${token}` };
+  }
+  return {};
+}
+
+export const apiBaseUrl = baseURL;
+
 // ---- Plant classes ----
 export const classesApi = {
   list: () => http.get<PlantClass[]>("/api/classes").then((r) => r.data),
@@ -115,6 +126,8 @@ export interface IdentifyCandidate {
   gbif_id?: string | null;
   powo_id?: string | null;
   image_url?: string | null;
+  agreed_by_both?: boolean | null;
+  note?: string | null;
 }
 
 export interface IdentifyResponse {
@@ -122,6 +135,19 @@ export interface IdentifyResponse {
   remaining_requests?: number | null;
   source?: string | null;
   candidates: IdentifyCandidate[];
+}
+
+export type IdentifyStep = "start" | "plantnet" | "openai" | "consolidate" | "complete";
+export type IdentifyStepStatus = "running" | "done" | "error" | "skipped";
+
+export interface IdentifyStreamEvent {
+  step: IdentifyStep;
+  status?: IdentifyStepStatus;
+  count?: number;
+  candidates?: IdentifyCandidate[];
+  summary?: string | null;
+  source?: string;
+  engines?: { plantnet: boolean; openai: boolean };
 }
 
 export const identifyApi = {
@@ -132,6 +158,40 @@ export const identifyApi = {
       headers: { "Content-Type": "multipart/form-data" },
     });
     return data;
+  },
+
+  // Ensemble identify with live progress (newline-delimited JSON stream).
+  identifyStream: async (
+    files: File[],
+    onEvent: (e: IdentifyStreamEvent) => void
+  ): Promise<void> => {
+    const form = new FormData();
+    files.forEach((f) => form.append("images", f));
+    const headers = await authHeaders();
+    const resp = await fetch(`${baseURL}/api/identify/stream`, {
+      method: "POST",
+      body: form,
+      headers,
+    });
+    if (!resp.ok || !resp.body) {
+      throw new Error(`Identify failed (${resp.status})`);
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const raw = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (raw) onEvent(JSON.parse(raw) as IdentifyStreamEvent);
+      }
+    }
+    const tail = buf.trim();
+    if (tail) onEvent(JSON.parse(tail) as IdentifyStreamEvent);
   },
 };
 

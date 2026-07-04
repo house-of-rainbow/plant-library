@@ -6,16 +6,19 @@ quickly identify a plant and, if the species is missing, add it.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..auth import CurrentUser, get_current_user
 from ..config import Settings, get_settings
-from ..openai_identify import identify_with_openai
+from ..openai_identify import consolidate_with_openai, identify_with_openai
 
 logger = logging.getLogger("plantlibrary.identify")
 
@@ -36,6 +39,8 @@ class IdentifyCandidate(BaseModel):
     gbif_id: Optional[str] = None
     powo_id: Optional[str] = None
     image_url: Optional[str] = None
+    agreed_by_both: Optional[bool] = None
+    note: Optional[str] = None
 
 
 class IdentifyResponse(BaseModel):
@@ -218,4 +223,169 @@ async def identify(
     raise HTTPException(
         status.HTTP_502_BAD_GATEWAY, "Identification services are unavailable."
     )
+
+
+async def _read_images(images: list[UploadFile]) -> list[tuple[str, bytes, str]]:
+    if not 1 <= len(images) <= _MAX_IMAGES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Provide between 1 and {_MAX_IMAGES} images.",
+        )
+    raw: list[tuple[str, bytes, str]] = []
+    for img in images:
+        content_type = img.content_type or "image/jpeg"
+        if content_type not in _ALLOWED_CONTENT_TYPES:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, f"Unsupported image type: {content_type}"
+            )
+        data = await img.read()
+        raw.append((img.filename or "image.jpg", data, content_type))
+    return raw
+
+
+def _fmt_candidates(cands: list[IdentifyCandidate]) -> str:
+    if not cands:
+        return "none"
+    return "; ".join(
+        f"{c.scientific_name} ({c.common_name or 'n/a'}) p={c.score:.2f}"
+        for c in cands[:5]
+    )
+
+
+@router.post("/stream")
+async def identify_stream(
+    images: list[UploadFile] = File(...),
+    settings: Settings = Depends(get_settings),
+    _: CurrentUser = Depends(get_current_user),
+):
+    """Ensemble identification with live progress (newline-delimited JSON).
+
+    Runs Pl@ntNet and the GPT vision model concurrently, then asks GPT to
+    consolidate both result sets. Emits one JSON object per line per step so the
+    UI can show progress.
+    """
+    raw = await _read_images(images)
+    has_pn = bool(settings.plantnet_api_key)
+    has_ai = bool(settings.openai_api_key)
+    if not has_pn and not has_ai:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Plant identification is not configured."
+        )
+
+    async def gen():
+        def line(obj: dict) -> str:
+            return json.dumps(obj) + "\n"
+
+        yield line({"step": "start", "engines": {"plantnet": has_pn, "openai": has_ai}})
+
+        pn_task = asyncio.create_task(_try_plantnet(raw, None, settings)) if has_pn else None
+        ai_task = asyncio.create_task(_try_openai(raw, settings)) if has_ai else None
+
+        yield line({"step": "plantnet", "status": "running" if has_pn else "skipped"})
+        yield line({"step": "openai", "status": "running" if has_ai else "skipped"})
+
+        pn_cands: list[IdentifyCandidate] = []
+        if pn_task is not None:
+            try:
+                pn_result, pn_failed = await pn_task
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Pl@ntNet task error: %s", exc)
+                pn_result, pn_failed = None, True
+            pn_cands = pn_result.candidates if pn_result else []
+            yield line(
+                {
+                    "step": "plantnet",
+                    "status": "error" if pn_failed else "done",
+                    "count": len(pn_cands),
+                    "candidates": [c.model_dump() for c in pn_cands],
+                }
+            )
+
+        ai_cands: list[IdentifyCandidate] = []
+        if ai_task is not None:
+            try:
+                ai_result = await ai_task
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("OpenAI task error: %s", exc)
+                ai_result = None
+            ai_cands = ai_result.candidates if ai_result else []
+            yield line(
+                {
+                    "step": "openai",
+                    "status": "error" if ai_result is None else "done",
+                    "count": len(ai_cands),
+                    "candidates": [c.model_dump() for c in ai_cands],
+                }
+            )
+
+        final: list[IdentifyCandidate] = []
+        summary: Optional[str] = None
+        did_consolidate = False
+
+        if has_ai and (pn_cands or ai_cands):
+            yield line({"step": "consolidate", "status": "running"})
+            try:
+                cons = await consolidate_with_openai(
+                    [(data, ct) for _, data, ct in raw],
+                    _fmt_candidates(pn_cands),
+                    _fmt_candidates(ai_cands),
+                    api_key=settings.openai_api_key,
+                    model=settings.openai_model,
+                )
+                pn_by_name = {
+                    (c.scientific_name_without_author or c.scientific_name or "").lower(): c
+                    for c in pn_cands
+                }
+                for cc in cons.candidates:
+                    match = pn_by_name.get((cc.scientific_name or "").lower())
+                    final.append(
+                        IdentifyCandidate(
+                            scientific_name=cc.scientific_name,
+                            scientific_name_without_author=cc.scientific_name,
+                            common_name=cc.common_name,
+                            common_names=[cc.common_name] if cc.common_name else [],
+                            genus=cc.genus,
+                            family=cc.family,
+                            score=max(0.0, min(1.0, cc.confidence)),
+                            image_url=match.image_url if match else None,
+                            gbif_id=match.gbif_id if match else None,
+                            powo_id=match.powo_id if match else None,
+                            agreed_by_both=cc.agreed_by_both,
+                            note=cc.note,
+                        )
+                    )
+                summary = cons.summary
+                did_consolidate = True
+                yield line({"step": "consolidate", "status": "done"})
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Consolidation failed: %s", exc)
+                yield line({"step": "consolidate", "status": "error"})
+        else:
+            yield line({"step": "consolidate", "status": "skipped"})
+
+        if not final:
+            # No consolidation → merge both lists, de-duplicated by binomial.
+            seen: set[str] = set()
+            for c in pn_cands + ai_cands:
+                key = (c.scientific_name_without_author or c.scientific_name or "").lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                final.append(c)
+
+        yield line(
+            {
+                "step": "complete",
+                "source": "consolidated" if did_consolidate else "merged",
+                "summary": summary,
+                "candidates": [c.model_dump() for c in final],
+            }
+        )
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
 

@@ -6,11 +6,21 @@ import {
   identifyApi,
   imagesApi,
   type IdentifyCandidate,
-  type IdentifyResponse,
+  type IdentifyStepStatus,
 } from "../api";
 import type { PlantClass } from "../types";
 
 const MAX_PHOTOS = 5;
+
+type StepKey = "plantnet" | "openai" | "consolidate";
+const STEPS: { key: StepKey; label: string }[] = [
+  { key: "plantnet", label: "Pl@ntNet" },
+  { key: "openai", label: "GPT vision" },
+  { key: "consolidate", label: "Consolidating" },
+];
+
+type StepState = Record<StepKey, { status?: IdentifyStepStatus; count?: number }>;
+const EMPTY_STEPS = {} as StepState;
 
 function confidenceColor(score: number): string {
   if (score >= 0.5) return "#34d399";
@@ -22,11 +32,113 @@ function normalize(s?: string | null): string {
   return (s ?? "").trim().toLowerCase();
 }
 
+function EngineList({
+  title,
+  items,
+  onImage,
+}: {
+  title: string;
+  items: IdentifyCandidate[];
+  onImage: (url: string) => void;
+}) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wider text-white/40 mb-1">{title}</div>
+      {items.length === 0 ? (
+        <p className="text-xs text-white/40">No candidates.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {items.map((c) => {
+            const pct = Math.round(c.score * 100);
+            return (
+              <li key={c.scientific_name + c.score} className="flex items-center gap-2">
+                {c.image_url ? (
+                  <button
+                    type="button"
+                    onClick={() => onImage(c.image_url!)}
+                    className="shrink-0"
+                    aria-label="View image"
+                  >
+                    <img
+                      src={c.image_url}
+                      className="h-8 w-8 rounded object-cover hover:ring-2 hover:ring-canopy-400"
+                    />
+                  </button>
+                ) : (
+                  <span className="grid h-8 w-8 place-items-center rounded bg-white/5 text-xs shrink-0">
+                    🌿
+                  </span>
+                )}
+                <span className="min-w-0 flex-1 truncate text-xs text-white/70">
+                  {c.common_name || c.scientific_name_without_author || c.scientific_name}
+                </span>
+                <span
+                  className="text-[11px] font-medium"
+                  style={{ color: confidenceColor(c.score) }}
+                >
+                  {pct}%
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function StepRow({
+  label,
+  status,
+  count,
+}: {
+  label: string;
+  status?: IdentifyStepStatus;
+  count?: number;
+}) {
+  let icon = <span className="h-4 w-4 rounded-full bg-white/15" />;
+  let tone = "text-white/40";
+  if (status === "running") {
+    icon = (
+      <motion.span
+        animate={{ rotate: 360 }}
+        transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+        className="inline-block text-canopy-300"
+      >
+        ◌
+      </motion.span>
+    );
+    tone = "text-white/80";
+  } else if (status === "done") {
+    icon = <span className="text-canopy-300">✓</span>;
+    tone = "text-white/80";
+  } else if (status === "error") {
+    icon = <span className="text-amber-300">!</span>;
+    tone = "text-amber-300/80";
+  } else if (status === "skipped") {
+    icon = <span className="text-white/30">–</span>;
+    tone = "text-white/30";
+  }
+  return (
+    <div className={`flex items-center gap-3 text-sm ${tone}`}>
+      <span className="grid h-5 w-5 place-items-center">{icon}</span>
+      <span className="flex-1">{label}</span>
+      {typeof count === "number" && status === "done" && (
+        <span className="text-xs text-white/40">
+          {count} match{count === 1 ? "" : "es"}
+        </span>
+      )}
+      {status === "error" && <span className="text-xs">unavailable</span>}
+      {status === "skipped" && <span className="text-xs">not configured</span>}
+    </div>
+  );
+}
+
 /**
- * Camera-first identification flow. The user snaps up to 5 photos, we call the
- * Pl@ntNet-backed /api/identify, then they pick a candidate. If no matching
- * species exists in the library we create it on the fly. The captured photos
- * are uploaded and handed back to prefill the new plant.
+ * Camera-first identification. Snap up to 5 photos, then the backend queries
+ * Pl@ntNet and GPT in parallel and asks GPT to consolidate both — progress is
+ * streamed and shown as steps. Pick a candidate to use (creating the species if
+ * it doesn't exist yet).
  */
 export default function IdentifyModal({
   classes,
@@ -41,13 +153,30 @@ export default function IdentifyModal({
 }) {
   const qc = useQueryClient();
   const [files, setFiles] = useState<File[]>([]);
-  const [result, setResult] = useState<IdentifyResponse | null>(null);
+  const [running, setRunning] = useState(false);
+  const [steps, setSteps] = useState<StepState>(EMPTY_STEPS);
+  const [candidates, setCandidates] = useState<IdentifyCandidate[] | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [engineResults, setEngineResults] = useState<{
+    plantnet: IdentifyCandidate[];
+    openai: IdentifyCandidate[];
+  }>({ plantnet: [], openai: [] });
+  const [showDetails, setShowDetails] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
 
   function reset() {
     setFiles([]);
-    setResult(null);
+    setRunning(false);
+    setSteps(EMPTY_STEPS);
+    setCandidates(null);
+    setSummary(null);
+    setError(null);
+    setEngineResults({ plantnet: [], openai: [] });
+    setShowDetails(false);
+    setLightbox(null);
   }
 
   function close() {
@@ -59,21 +188,48 @@ export default function IdentifyModal({
     const selected = Array.from(e.target.files ?? []);
     if (!selected.length) return;
     setFiles((prev) => [...prev, ...selected].slice(0, MAX_PHOTOS));
-    setResult(null);
+    setCandidates(null);
     e.target.value = "";
   }
 
   function removeFile(idx: number) {
     setFiles((prev) => prev.filter((_, i) => i !== idx));
-    setResult(null);
+    setCandidates(null);
   }
 
-  const identify = useMutation({
-    mutationFn: () => identifyApi.identify(files),
-    onSuccess: (data) => setResult(data),
-  });
+  async function runIdentify() {
+    setRunning(true);
+    setError(null);
+    setCandidates(null);
+    setSummary(null);
+    setSteps({
+      plantnet: { status: "running" },
+      openai: { status: "running" },
+      consolidate: {},
+    } as StepState);
+    setEngineResults({ plantnet: [], openai: [] });
+    setShowDetails(false);
+    try {
+      await identifyApi.identifyStream(files, (e) => {
+        if (e.step === "complete") {
+          setCandidates(e.candidates ?? []);
+          setSummary(e.summary ?? null);
+        } else if (e.step === "plantnet" || e.step === "openai" || e.step === "consolidate") {
+          const key = e.step as StepKey;
+          setSteps((prev) => ({ ...prev, [key]: { status: e.status, count: e.count } }));
+          if ((e.step === "plantnet" || e.step === "openai") && e.candidates) {
+            const engine = e.step;
+            setEngineResults((prev) => ({ ...prev, [engine]: e.candidates ?? [] }));
+          }
+        }
+      });
+    } catch {
+      setError("Identification failed. Check the photos and try again.");
+    } finally {
+      setRunning(false);
+    }
+  }
 
-  // Find an existing library species that matches a candidate (by binomial).
   function matchClass(c: IdentifyCandidate): PlantClass | undefined {
     const binomial = normalize(c.scientific_name_without_author || c.scientific_name);
     return classes.find((cls) => {
@@ -84,9 +240,7 @@ export default function IdentifyModal({
 
   const use = useMutation({
     mutationFn: async (candidate: IdentifyCandidate) => {
-      // Upload the captured photos so they can be attached to the plant.
       const imageUrls = await Promise.all(files.map((f) => imagesApi.upload(f)));
-
       let cls = matchClass(candidate);
       if (!cls) {
         cls = await classesApi.create({
@@ -111,6 +265,8 @@ export default function IdentifyModal({
     },
   });
 
+  const showSteps = running || candidates !== null;
+
   return (
     <AnimatePresence>
       {open && (
@@ -131,7 +287,7 @@ export default function IdentifyModal({
             <div>
               <h2 className="font-display text-2xl font-bold">📷 Identify a plant</h2>
               <p className="text-sm text-white/50">
-                Snap up to {MAX_PHOTOS} photos — leaves, flowers or fruit work best.
+                Snap up to {MAX_PHOTOS} photos — we cross-check Pl@ntNet and AI vision.
               </p>
             </div>
 
@@ -166,32 +322,38 @@ export default function IdentifyModal({
 
             <button
               className="btn-primary w-full"
-              disabled={!files.length || identify.isPending}
-              onClick={() => identify.mutate()}
+              disabled={!files.length || running}
+              onClick={runIdentify}
             >
-              {identify.isPending ? "Identifying…" : "Identify"}
+              {running ? "Identifying…" : "Identify"}
             </button>
 
-            {identify.isError && (
-              <p className="text-sm text-red-300">
-                Identification failed. Check the photos and try again.
-              </p>
+            {error && <p className="text-sm text-red-300">{error}</p>}
+
+            {/* Progress stepper */}
+            {showSteps && (
+              <div className="glass-soft p-4 space-y-2.5">
+                {STEPS.map((s) => (
+                  <StepRow
+                    key={s.key}
+                    label={s.label}
+                    status={steps[s.key]?.status}
+                    count={steps[s.key]?.count}
+                  />
+                ))}
+              </div>
             )}
 
             {/* Results */}
-            {result && (
+            {candidates !== null && (
               <div className="space-y-2">
-                {result.source === "openai" && result.candidates.length > 0 && (
-                  <p className="text-xs text-white/40">
-                    ✨ Identified by AI (Pl@ntNet unavailable) — double-check the match.
-                  </p>
-                )}
-                {result.candidates.length === 0 && (
+                {summary && <p className="text-xs text-white/60 italic">“{summary}”</p>}
+                {candidates.length === 0 && (
                   <p className="text-sm text-white/60">
                     No confident match. Try clearer photos of leaves or flowers.
                   </p>
                 )}
-                {result.candidates.map((c) => {
+                {candidates.map((c) => {
                   const existing = matchClass(c);
                   const pct = Math.round(c.score * 100);
                   return (
@@ -200,18 +362,34 @@ export default function IdentifyModal({
                       className="glass-soft p-3 flex items-center gap-3"
                     >
                       {c.image_url ? (
-                        <img
-                          src={c.image_url}
-                          className="h-12 w-12 rounded-lg object-cover shrink-0"
-                        />
+                        <button
+                          type="button"
+                          onClick={() => setLightbox(c.image_url!)}
+                          className="shrink-0"
+                          aria-label="View image"
+                        >
+                          <img
+                            src={c.image_url}
+                            className="h-12 w-12 rounded-lg object-cover hover:ring-2 hover:ring-canopy-400"
+                          />
+                        </button>
                       ) : (
                         <div className="grid h-12 w-12 place-items-center rounded-lg bg-white/5 shrink-0">
                           🌿
                         </div>
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold">
-                          {c.common_name || c.scientific_name_without_author || c.scientific_name}
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-semibold">
+                            {c.common_name ||
+                              c.scientific_name_without_author ||
+                              c.scientific_name}
+                          </span>
+                          {c.agreed_by_both && (
+                            <span className="pill bg-canopy-500/20 text-canopy-200 text-[10px] py-0">
+                              ✓ both
+                            </span>
+                          )}
                         </div>
                         <div className="truncate text-xs italic text-white/50">
                           {c.scientific_name_without_author || c.scientific_name}
@@ -221,7 +399,10 @@ export default function IdentifyModal({
                           <div className="h-1.5 flex-1 rounded-full bg-white/10 overflow-hidden">
                             <div
                               className="h-full rounded-full"
-                              style={{ width: `${pct}%`, backgroundColor: confidenceColor(c.score) }}
+                              style={{
+                                width: `${pct}%`,
+                                backgroundColor: confidenceColor(c.score),
+                              }}
                             />
                           </div>
                           <span
@@ -248,6 +429,41 @@ export default function IdentifyModal({
                 {use.isError && (
                   <p className="text-sm text-red-300">Couldn't save. Please retry.</p>
                 )}
+
+                {(engineResults.plantnet.length > 0 || engineResults.openai.length > 0) && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowDetails((v) => !v)}
+                      className="text-xs text-white/50 hover:text-white/80"
+                    >
+                      {showDetails ? "▾ Hide" : "▸ See"} what each engine said
+                    </button>
+                    <AnimatePresence initial={false}>
+                      {showDetails && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3">
+                            <EngineList
+                              title="Pl@ntNet"
+                              items={engineResults.plantnet}
+                              onImage={setLightbox}
+                            />
+                            <EngineList
+                              title="GPT vision"
+                              items={engineResults.openai}
+                              onImage={setLightbox}
+                            />
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
               </div>
             )}
 
@@ -257,6 +473,40 @@ export default function IdentifyModal({
               </button>
             </div>
           </motion.div>
+
+          {/* Image lightbox */}
+          <AnimatePresence>
+            {lightbox && (
+              <motion.div
+                className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightbox(null);
+                }}
+              >
+                <motion.img
+                  src={lightbox}
+                  initial={{ scale: 0.9 }}
+                  animate={{ scale: 1 }}
+                  exit={{ scale: 0.9 }}
+                  className="max-h-[90vh] max-w-[90vw] rounded-2xl object-contain"
+                />
+                <button
+                  className="absolute top-5 right-5 text-2xl text-white/80"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLightbox(null);
+                  }}
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       )}
     </AnimatePresence>

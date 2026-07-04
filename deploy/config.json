@@ -17,7 +17,7 @@
     "blobContainerName": "plant-images"
   },
   "openai": {
-    "model": "gpt-4o"
+    "model": "gpt-5.5"
   },
   "acr": {
     "name": "fbreg",
