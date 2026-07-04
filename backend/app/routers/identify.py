@@ -104,7 +104,10 @@ async def _try_plantnet(
         return None, True
 
     files = [("images", (fn, data, ct)) for fn, data, ct in raw]
-    form_data = [("organs", o) for o in organs] if organs else []
+    # `data` must be a mapping (dict). httpx treats a list/None-mixed value as raw
+    # content, which breaks multipart uploads on an AsyncClient. Repeated multipart
+    # fields are expressed as a dict with a list value: {"organs": [...]}.
+    form_data = {"organs": organs} if organs else None
     params = {
         "api-key": settings.plantnet_api_key,
         "nb-results": 5,
