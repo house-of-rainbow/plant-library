@@ -1,1 +1,7 @@
+# Self-contained deps for the MCP image. It reuses backend/app source but only
+# needs the data layer's runtime deps — NOT fastapi/uvicorn/openai/etc. This
+# avoids dependency conflicts (e.g. fastmcp's newer pydantic/starlette vs fastapi).
 fastmcp==3.4.2
+azure-cosmos==4.9.0
+pydantic==2.11.7
+pydantic-settings==2.7.1

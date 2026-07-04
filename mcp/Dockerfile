@@ -8,9 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv
 
-COPY backend/requirements.txt backend-requirements.txt
-COPY mcp/requirements.txt mcp-requirements.txt
-RUN pip install --no-cache-dir -r backend-requirements.txt -r mcp-requirements.txt
+COPY mcp/requirements.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Reuse the backend domain layer + the MCP server entrypoint.
 COPY backend/app ./app
