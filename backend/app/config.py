@@ -1,0 +1,53 @@
+"""Application configuration loaded from environment variables.
+
+Secrets are never hard-coded; everything is sourced from the environment
+(injected via env vars in production, `.env` for local development).
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    # App
+    app_env: str = "development"
+    log_level: str = "INFO"
+    cors_origins: str = "http://localhost:5173"
+
+    # Cosmos DB
+    cosmos_endpoint: str = "https://localhost:8081"
+    cosmos_key: str = ""
+    cosmos_database: str = "plantlibrary"
+    cosmos_classes_container: str = "plant_classes"
+    cosmos_instances_container: str = "plant_instances"
+    cosmos_allow_insecure: bool = False
+
+    # Blob storage
+    azure_storage_connection_string: str = ""
+    azure_storage_container: str = "plant-images"
+    azure_storage_public_base_url: str = ""
+
+    # Auth (EntraID)
+    auth_disabled: bool = True
+    entra_tenant_id: str = "common"
+    entra_client_id: str = ""
+    entra_api_audience: str = ""
+
+    # Scan / labels
+    scan_base_url: str = "http://localhost:5173/scan"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return a cached Settings singleton."""
+    return Settings()

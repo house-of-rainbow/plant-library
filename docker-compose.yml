@@ -1,0 +1,53 @@
+# Burien Station Plant Library — local development stack.
+# Backend + frontend + Cosmos DB emulator + Azurite (blob storage).
+#
+# Usage:
+#   docker compose up --build
+# Then open http://localhost:3000  (frontend)  /  http://localhost:8000/docs (API)
+
+services:
+  cosmos:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+    container_name: plant-cosmos
+    ports:
+      - "8081:8081"
+      - "10251:10251"
+      - "10252:10252"
+      - "10253:10253"
+      - "10254:10254"
+    environment:
+      AZURE_COSMOS_EMULATOR_PARTITION_COUNT: 5
+      AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE: "true"
+    # The emulator can be slow to start; give it time.
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:8081/_explorer/emulator.pem"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: plant-azurite
+    command: "azurite --blobHost 0.0.0.0 --loose"
+    ports:
+      - "10000:10000"
+
+  backend:
+    build: ./backend
+    container_name: plant-backend
+    env_file:
+      - ./backend/.env.docker
+    ports:
+      - "8000:8000"
+    depends_on:
+      - azurite
+
+  frontend:
+    build: ./frontend
+    container_name: plant-frontend
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend

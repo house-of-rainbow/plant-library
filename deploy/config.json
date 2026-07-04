@@ -1,0 +1,50 @@
+{
+  "namePrefix": "burienplants",
+  "location": "westus2",
+  "environment": "prod",
+  "resourceGroupName": "plant-library",
+  "tags": {
+    "application": "burien-plant-library",
+    "environment": "prod",
+    "managedBy": "azure-devops"
+  },
+  "cosmos": {
+    "databaseName": "plantlibrary",
+    "classesContainer": "plant_classes",
+    "instancesContainer": "plant_instances"
+  },
+  "storage": {
+    "blobContainerName": "plant-images"
+  },
+  "backend": {
+    "cpu": "2",
+    "memory": "4.0Gi",
+    "minReplicas": 0,
+    "maxReplicas": 1,
+    "targetPort": 8000
+  },
+  "frontend": {
+    "cpu": "0.5",
+    "memory": "1.0Gi",
+    "minReplicas": 0,
+    "maxReplicas": 1,
+    "targetPort": 80
+  },
+  "auth": {
+    "authDisabled": false,
+    "entraTenantId": "14268b2a-8744-4ef9-9db8-ecb707139451",
+    "entraClientId": "f4860ff8-eecf-41f3-bfad-7aff8b83c0b3",
+    "entraApiAudience": "api://f4860ff8-eecf-41f3-bfad-7aff8b83c0b3/access_as_user"
+  },
+  "customDomains": {
+    "enabled": false,
+    "apps": [
+      {
+        "app": "frontend",
+        "dnsName": "plants.burienstation.com",
+        "cloudflareZoneName": "burienstation.com",
+        "cloudflareZoneId": "a6481fa6d80bfe0429b54ba896f648c3"
+      }
+    ]
+  }
+}

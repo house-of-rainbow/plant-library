@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: radial-gradient(
+      1200px 800px at 20% -10%,
+      rgba(32, 161, 94, 0.18),
+      transparent 60%
+    ),
+    radial-gradient(1000px 700px at 100% 0%, rgba(236, 72, 153, 0.12), transparent 55%),
+    #04120b;
+  color: #e8f5ec;
+  font-family: Inter, system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl;
+  }
+  .glass-soft {
+    @apply bg-white/[0.03] backdrop-blur-md border border-white/[0.08] rounded-2xl;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5
+      font-semibold transition-all active:scale-95 disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-canopy-500 text-canopy-950 hover:bg-canopy-400 shadow-glow;
+  }
+  .btn-ghost {
+    @apply btn bg-white/5 text-white hover:bg-white/10 border border-white/10;
+  }
+  .input {
+    @apply w-full rounded-xl bg-black/30 border border-white/10 px-4 py-2.5
+      text-white placeholder-white/30 outline-none focus:border-canopy-400
+      focus:ring-2 focus:ring-canopy-400/30;
+  }
+  .label {
+    @apply block text-xs uppercase tracking-wider text-white/50 mb-1.5;
+  }
+}
+
+/* Hide scrollbars but keep scroll */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

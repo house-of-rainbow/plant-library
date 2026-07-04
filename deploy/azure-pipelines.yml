@@ -1,0 +1,368 @@
+# ---------------------------------------------------------------------------
+# Burien Station Plant Library — multistage Azure DevOps pipeline
+#
+#   Stage 1  BuildBackend         build backend image -> artifact
+#   Stage 2  BuildFrontend        build frontend image -> artifact
+#   Stage 3  DeployInfrastructure bicep via Azure CLI (runs in parallel)
+#   Stage 4  DeployBackend        needs (1, 3): push image + update app
+#   Stage 5  DeployFrontend       needs (2, 3): push image + update app
+#
+# Prerequisites:
+#   * An ARM service connection named by `azureServiceConnection` below.
+#   * A secret pipeline variable `ENTRA_CLIENT_SECRET` (may be empty) — consumed
+#     by main.bicepparam via readEnvironmentVariable.
+#   * For custom domains: a variable group `cloudflare-api` containing a secret
+#     `CLOUDFLARE_API_TOKEN` (Zone.DNS edit permission), plus the domain details
+#     in deploy/config.json (customDomains).
+#   * Bicep is invoked through the Azure CLI task (not dedicated Bicep tasks).
+# ---------------------------------------------------------------------------
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - backend/**
+      - frontend/**
+      - deploy/**
+
+variables:
+  - group: cloudflare-api # provides the secret CLOUDFLARE_API_TOKEN (used by the CustomDomains stage)
+  - name: azureServiceConnection
+    value: 'plant-library-sc' # <-- set to your ARM service connection name
+  - name: vmImage
+    value: 'ubuntu-latest'
+  - name: backendImageName
+    value: 'plant-backend'
+  - name: frontendImageName
+    value: 'plant-frontend'
+  - name: imageTag
+    value: '$(Build.BuildId)'
+
+stages:
+  # -------------------------------------------------------------------------
+  - stage: BuildBackend
+    displayName: '1 · Build backend'
+    dependsOn: []
+    jobs:
+      - job: build
+        pool:
+          vmImage: $(vmImage)
+        steps:
+          - checkout: self
+          - script: |
+              set -euo pipefail
+              docker build -t $(backendImageName):$(imageTag) ./backend
+              mkdir -p "$(Build.ArtifactStagingDirectory)"
+              docker save $(backendImageName):$(imageTag) \
+                -o "$(Build.ArtifactStagingDirectory)/backend-image.tar"
+            displayName: 'Build and save backend image'
+          - publish: '$(Build.ArtifactStagingDirectory)/backend-image.tar'
+            artifact: backend-image
+
+  # -------------------------------------------------------------------------
+  - stage: BuildFrontend
+    displayName: '2 · Build frontend'
+    dependsOn: []
+    jobs:
+      - job: build
+        pool:
+          vmImage: $(vmImage)
+        steps:
+          - checkout: self
+          - script: |
+              set -euo pipefail
+              docker build -t $(frontendImageName):$(imageTag) ./frontend
+              mkdir -p "$(Build.ArtifactStagingDirectory)"
+              docker save $(frontendImageName):$(imageTag) \
+                -o "$(Build.ArtifactStagingDirectory)/frontend-image.tar"
+            displayName: 'Build and save frontend image'
+          - publish: '$(Build.ArtifactStagingDirectory)/frontend-image.tar'
+            artifact: frontend-image
+
+  # -------------------------------------------------------------------------
+  - stage: DeployInfrastructure
+    displayName: '3 · Deploy infrastructure'
+    dependsOn: []
+    jobs:
+      - job: infra
+        pool:
+          vmImage: $(vmImage)
+        steps:
+          - checkout: self
+          - task: AzureCLI@2
+            name: deployInfra
+            displayName: 'Deploy Bicep (Azure CLI)'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+
+                RG=$(jq -r '.resourceGroupName' deploy/config.json)
+                LOC=$(jq -r '.location' deploy/config.json)
+                DEPLOYMENT="plantlib-$(Build.BuildId)"
+
+                echo "Ensuring resource group '$RG' in '$LOC'..."
+                az group create --name "$RG" --location "$LOC" --output none
+
+                echo "Deploying infrastructure..."
+                az deployment group create \
+                  --resource-group "$RG" \
+                  --name "$DEPLOYMENT" \
+                  --template-file deploy/bicep/main.bicep \
+                  --parameters deploy/bicep/main.bicepparam \
+                  --output none
+
+                OUT=$(az deployment group show \
+                  --resource-group "$RG" \
+                  --name "$DEPLOYMENT" \
+                  --query properties.outputs -o json)
+
+                set_out () {
+                  local var="$1"; local key="$2"
+                  local val
+                  val=$(echo "$OUT" | jq -r ".${key}.value")
+                  echo "##vso[task.setvariable variable=${var};isOutput=true]${val}"
+                  echo "  ${var} = ${val}"
+                }
+
+                echo "##vso[task.setvariable variable=rgName;isOutput=true]${RG}"
+                set_out acrName acrName
+                set_out acrLoginServer acrLoginServer
+                set_out backendAppName backendAppName
+                set_out frontendAppName frontendAppName
+                set_out backendFqdn backendFqdn
+                set_out frontendFqdn frontendFqdn
+                set_out managedEnvironmentName managedEnvironmentName
+            env:
+              ENTRA_CLIENT_SECRET: $(ENTRA_CLIENT_SECRET)
+
+  # -------------------------------------------------------------------------
+  - stage: DeployBackend
+    displayName: '4 · Deploy backend'
+    dependsOn:
+      - BuildBackend
+      - DeployInfrastructure
+    variables:
+      rgName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.rgName'] ]
+      acrName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrName'] ]
+      acrLoginServer: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrLoginServer'] ]
+      backendAppName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.backendAppName'] ]
+    jobs:
+      - job: deploy
+        pool:
+          vmImage: $(vmImage)
+        steps:
+          - download: current
+            artifact: backend-image
+          - task: AzureCLI@2
+            displayName: 'Push image and update backend app'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                docker load -i "$(Pipeline.Workspace)/backend-image/backend-image.tar"
+                az acr login --name "$(acrName)"
+                docker tag $(backendImageName):$(imageTag) \
+                  "$(acrLoginServer)/$(backendImageName):$(imageTag)"
+                docker push "$(acrLoginServer)/$(backendImageName):$(imageTag)"
+                az containerapp update \
+                  --name "$(backendAppName)" \
+                  --resource-group "$(rgName)" \
+                  --image "$(acrLoginServer)/$(backendImageName):$(imageTag)" \
+                  --output none
+                echo "Backend deployed: $(backendAppName)"
+
+  # -------------------------------------------------------------------------
+  - stage: DeployFrontend
+    displayName: '5 · Deploy frontend'
+    dependsOn:
+      - BuildFrontend
+      - DeployInfrastructure
+    variables:
+      rgName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.rgName'] ]
+      acrName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrName'] ]
+      acrLoginServer: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrLoginServer'] ]
+      frontendAppName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.frontendAppName'] ]
+      backendFqdn: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.backendFqdn'] ]
+    jobs:
+      - job: deploy
+        pool:
+          vmImage: $(vmImage)
+        steps:
+          - download: current
+            artifact: frontend-image
+          - task: AzureCLI@2
+            displayName: 'Push image and update frontend app'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                docker load -i "$(Pipeline.Workspace)/frontend-image/frontend-image.tar"
+                az acr login --name "$(acrName)"
+                docker tag $(frontendImageName):$(imageTag) \
+                  "$(acrLoginServer)/$(frontendImageName):$(imageTag)"
+                docker push "$(acrLoginServer)/$(frontendImageName):$(imageTag)"
+                # Point nginx at the backend's public FQDN and roll out the image.
+                az containerapp update \
+                  --name "$(frontendAppName)" \
+                  --resource-group "$(rgName)" \
+                  --image "$(acrLoginServer)/$(frontendImageName):$(imageTag)" \
+                  --set-env-vars "BACKEND_URL=https://$(backendFqdn)" \
+                  --output none
+                echo "Frontend deployed: $(frontendAppName)"
+
+  # -------------------------------------------------------------------------
+  # 6 · Custom domains + Cloudflare DNS + Azure managed (ACME) certificates.
+  #     Skipped automatically when customDomains.enabled is false in config.json.
+  #     For each configured domain:
+  #       a) create asuid TXT + CNAME in Cloudflare (update_cloudflare_dns.py)
+  #       b) register the custom domain on the Container App (unbound)
+  #       c) provision an Azure managed certificate (CNAME-validated, via Bicep)
+  #       d) SNI-bind the certificate to the domain
+  #     Managed certs are reused on re-runs and auto-renewed by Azure.
+  # -------------------------------------------------------------------------
+  - stage: CustomDomains
+    displayName: '6 · Custom domains & certificates'
+    dependsOn:
+      - DeployInfrastructure
+      - DeployBackend
+      - DeployFrontend
+    variables:
+      rgName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.rgName'] ]
+      backendAppName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.backendAppName'] ]
+      frontendAppName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.frontendAppName'] ]
+      managedEnvironmentName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.managedEnvironmentName'] ]
+    jobs:
+      - job: customDomains
+        pool:
+          vmImage: $(vmImage)
+        steps:
+          - checkout: self
+          - task: AzureCLI@2
+            displayName: 'Configure Cloudflare DNS + managed certificates'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az extension add --name containerapp --upgrade --only-show-errors -y || true
+
+                CFG=deploy/config.json
+                ENABLED=$(jq -r '.customDomains.enabled // false' "$CFG")
+                if [ "$ENABLED" != "true" ]; then
+                  echo "customDomains.enabled is not true — skipping custom domain setup."
+                  exit 0
+                fi
+
+                RG="$(rgName)"
+                ENV_NAME="$(managedEnvironmentName)"
+                COUNT=$(jq '.customDomains.apps | length' "$CFG")
+                DOMAINS_FOR_BICEP='[]'
+
+                app_container_name () {
+                  case "$1" in
+                    frontend) echo "$(frontendAppName)" ;;
+                    backend)  echo "$(backendAppName)" ;;
+                    *) echo "" ;;
+                  esac
+                }
+
+                # --- (a) Cloudflare DNS + (b) register custom domain ---
+                for i in $(seq 0 $((COUNT - 1))); do
+                  APP=$(jq -r ".customDomains.apps[$i].app" "$CFG")
+                  DNS=$(jq -r ".customDomains.apps[$i].dnsName" "$CFG")
+                  ZONE_NAME=$(jq -r ".customDomains.apps[$i].cloudflareZoneName" "$CFG")
+                  ZONE_ID=$(jq -r ".customDomains.apps[$i].cloudflareZoneId" "$CFG")
+
+                  if [ -z "$DNS" ] || [ "$DNS" = "null" ]; then
+                    echo "No dnsName for '$APP' — skipping."
+                    continue
+                  fi
+
+                  APP_NAME=$(app_container_name "$APP")
+                  if [ -z "$APP_NAME" ]; then
+                    echo "Unknown app '$APP' in customDomains.apps." >&2
+                    exit 1
+                  fi
+
+                  FQDN=$(az containerapp show -g "$RG" -n "$APP_NAME" \
+                    --query "properties.configuration.ingress.fqdn" -o tsv)
+                  VERIFICATION=$(az containerapp show -g "$RG" -n "$APP_NAME" \
+                    --query "properties.customDomainVerificationId" -o tsv)
+
+                  echo "Configuring $DNS -> $APP_NAME ($FQDN)"
+
+                  ENTRY=$(jq -n --arg dns "$DNS" --arg zn "$ZONE_NAME" --arg zid "$ZONE_ID" \
+                    '{dnsName:$dns, cloudflareZoneName:$zn, cloudflareZoneId:$zid}')
+                  DEP_FILE=$(mktemp)
+                  jq -n --argjson e "$ENTRY" '{appDeployments:[$e]}' > "$DEP_FILE"
+                  FQDNS=$(jq -n --arg dns "$DNS" --arg fqdn "$FQDN" \
+                    '[{customDomain:$dns, defaultFqdn:$fqdn}]')
+
+                  python3 deploy/scripts/update_cloudflare_dns.py \
+                    --app-deployments-file "$DEP_FILE" \
+                    --verification-token "$VERIFICATION" \
+                    --app-fqdns-json "$FQDNS"
+                  rm -f "$DEP_FILE"
+
+                  # Register the custom domain (unbound). Retry to allow DNS to propagate.
+                  for attempt in 1 2 3 4 5; do
+                    if az containerapp hostname add -g "$RG" -n "$APP_NAME" \
+                        --hostname "$DNS" --only-show-errors; then
+                      break
+                    fi
+                    echo "hostname add attempt $attempt failed (DNS may still be propagating); retrying..."
+                    sleep 20
+                  done
+
+                  CERT_NAME="cert-${DNS//./-}"
+                  DOMAINS_FOR_BICEP=$(echo "$DOMAINS_FOR_BICEP" \
+                    | jq --arg d "$DNS" --arg c "$CERT_NAME" '. + [{dnsName:$d, certificateName:$c}]')
+                done
+
+                if [ "$DOMAINS_FOR_BICEP" = "[]" ]; then
+                  echo "No domains to provision certificates for."
+                  exit 0
+                fi
+
+                # --- (c) Provision managed certificates via Bicep (idempotent/reused) ---
+                PARAM_FILE=$(mktemp)
+                jq -n --arg env "$ENV_NAME" --argjson domains "$DOMAINS_FOR_BICEP" \
+                  '{"$schema":"https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#","contentVersion":"1.0.0.0","parameters":{environmentName:{value:$env},domains:{value:$domains}}}' \
+                  > "$PARAM_FILE"
+
+                az deployment group create \
+                  --resource-group "$RG" \
+                  --name "plantlib-certs-$(Build.BuildId)" \
+                  --template-file deploy/bicep/customdomain.bicep \
+                  --parameters @"$PARAM_FILE" \
+                  --output none
+                rm -f "$PARAM_FILE"
+
+                # --- (d) SNI-bind each certificate to its domain ---
+                for i in $(seq 0 $((COUNT - 1))); do
+                  APP=$(jq -r ".customDomains.apps[$i].app" "$CFG")
+                  DNS=$(jq -r ".customDomains.apps[$i].dnsName" "$CFG")
+                  if [ -z "$DNS" ] || [ "$DNS" = "null" ]; then continue; fi
+                  APP_NAME=$(app_container_name "$APP")
+                  CERT_NAME="cert-${DNS//./-}"
+
+                  az containerapp hostname bind -g "$RG" -n "$APP_NAME" \
+                    --hostname "$DNS" \
+                    --environment "$ENV_NAME" \
+                    --certificate "$CERT_NAME" \
+                    --validation-method CNAME \
+                    --only-show-errors || echo "hostname bind: already bound for $DNS"
+                  echo "Bound $DNS -> $APP_NAME (SNI, managed cert $CERT_NAME)"
+                done
+            env:
+              CLOUDFLARE_API_TOKEN: $(CLOUDFLARE_API_TOKEN)
