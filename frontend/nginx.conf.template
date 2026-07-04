@@ -9,12 +9,19 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # Proxy API calls to the backend. ${BACKEND_URL} is substituted at container
-    # start by nginx's envsubst (see BACKEND_URL env var). Locally it defaults to
+    # Proxy API calls to the backend. ${BACKEND_URL} / ${BACKEND_HOST} are
+    # substituted at container start by nginx's envsubst. Locally they default to
     # the compose service; in Azure the release pipeline sets the backend FQDN.
+    #
+    # When the upstream is HTTPS (Azure Container Apps), we must send SNI and the
+    # backend's own Host header so the ACA ingress can route + complete the TLS
+    # handshake — otherwise the handshake is reset and requests 502.
     location /api/ {
         proxy_pass ${BACKEND_URL};
-        proxy_set_header Host $host;
+        proxy_http_version 1.1;
+        proxy_set_header Host ${BACKEND_HOST};
+        proxy_ssl_server_name on;
+        proxy_ssl_name ${BACKEND_HOST};
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;

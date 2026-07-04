@@ -47,6 +47,7 @@ services:
     container_name: plant-frontend
     environment:
       BACKEND_URL: http://backend:8000
+      BACKEND_HOST: backend
     ports:
       - "3000:80"
     depends_on:

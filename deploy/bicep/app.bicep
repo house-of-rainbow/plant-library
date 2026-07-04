@@ -208,6 +208,11 @@ module frontendApp 'modules/containerApp.bicep' = {
         name: 'BACKEND_URL'
         value: 'https://${backendFqdn}'
       }
+      {
+        // Upstream host used by nginx for SNI + the Host header (ACA routing).
+        name: 'BACKEND_HOST'
+        value: backendFqdn
+      }
     ]
   }
 }
