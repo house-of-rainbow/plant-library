@@ -1,0 +1,40 @@
+# ------------------------------------------------------------------
+# Burien Station Plant Library — Backend environment configuration
+# Copy to `.env` for local development. NEVER commit real secrets.
+# All secrets are injected via environment variables in production.
+# ------------------------------------------------------------------
+
+# --- App ---
+APP_ENV=development
+LOG_LEVEL=INFO
+# Comma-separated list of allowed CORS origins for the frontend
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+
+# --- Cosmos DB ---
+# For the local emulator the well-known key below is used by default.
+COSMOS_ENDPOINT=https://localhost:8081
+COSMOS_KEY=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+COSMOS_DATABASE=plantlibrary
+COSMOS_CLASSES_CONTAINER=plant_classes
+COSMOS_INSTANCES_CONTAINER=plant_instances
+# Set to true to skip TLS verification against the local emulator.
+COSMOS_ALLOW_INSECURE=true
+
+# --- Azure Blob Storage (images) ---
+# Local dev uses Azurite. In production supply the real connection string.
+AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;
+AZURE_STORAGE_CONTAINER=plant-images
+# Public base URL used to build image links returned to the client.
+AZURE_STORAGE_PUBLIC_BASE_URL=http://localhost:10000/devstoreaccount1
+
+# --- EntraID (Azure AD) auth ---
+# When AUTH_DISABLED=true a stub user is injected (local dev only).
+AUTH_DISABLED=true
+ENTRA_TENANT_ID=common
+ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000000
+# Expected audience for access tokens (usually api://<client-id> or the client id).
+ENTRA_API_AUDIENCE=00000000-0000-0000-0000-000000000000
+
+# --- Scan / labels ---
+# Base URL the QR / NFC labels point at (the frontend /scan route).
+SCAN_BASE_URL=http://localhost:5173/scan
