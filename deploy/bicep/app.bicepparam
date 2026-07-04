@@ -37,10 +37,18 @@ param frontendMinReplicas = config.frontend.minReplicas
 param frontendMaxReplicas = config.frontend.maxReplicas
 param frontendTargetPort = config.frontend.targetPort
 
+param mcpCpu = config.mcp.cpu
+param mcpMemory = config.mcp.memory
+param mcpMinReplicas = config.mcp.minReplicas
+param mcpMaxReplicas = config.mcp.maxReplicas
+param mcpTargetPort = config.mcp.targetPort
+
 // Injected by the pipeline. Images default to a placeholder for a dry run.
 param backendImage = readEnvironmentVariable('BACKEND_IMAGE', 'mcr.microsoft.com/k8se/quickstart:latest')
 param frontendImage = readEnvironmentVariable('FRONTEND_IMAGE', 'mcr.microsoft.com/k8se/quickstart:latest')
+param mcpImage = readEnvironmentVariable('MCP_IMAGE', 'mcr.microsoft.com/k8se/quickstart:latest')
 param hasEntraSecret = !empty(readEnvironmentVariable('ENTRA_CLIENT_SECRET', ''))
 param hasPlantnetKey = !empty(readEnvironmentVariable('PLANT_DOT_NET__API_KEY', ''))
 param hasOpenaiKey = !empty(readEnvironmentVariable('OPENAI_API_KEY', ''))
+param hasMcpApiKeys = !empty(readEnvironmentVariable('MCP_API_KEYS', ''))
 param openaiModel = config.openai.model

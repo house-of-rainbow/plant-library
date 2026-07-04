@@ -53,3 +53,18 @@ services:
       - "3000:80"
     depends_on:
       - backend
+
+  mcp:
+    build:
+      context: .
+      dockerfile: mcp/Dockerfile
+    container_name: plant-mcp
+    env_file:
+      - ./backend/.env.docker
+    environment:
+      # Comma-separated GUIDs; any listed key is a valid MCP API key.
+      MCP_API_KEYS: "11111111-1111-1111-1111-111111111111"
+    ports:
+      - "8100:8000"
+    depends_on:
+      - backend

@@ -61,6 +61,10 @@ param openaiModel string = 'gpt-4o'
 // Images (set by the release pipeline; default placeholder for a dry run)
 param backendImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
 param frontendImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
+param mcpImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
+
+@description('Whether an mcp-api-keys secret exists in Key Vault (set by the pipeline).')
+param hasMcpApiKeys bool = false
 
 // Backend app sizing
 param backendCpu string
@@ -76,6 +80,13 @@ param frontendMinReplicas int
 param frontendMaxReplicas int
 param frontendTargetPort int
 
+// MCP app sizing
+param mcpCpu string
+param mcpMemory string
+param mcpMinReplicas int
+param mcpMaxReplicas int
+param mcpTargetPort int
+
 // ---------------------------------------------------------------------------
 // Names (identical formula to infra.bicep — same RG, so uniqueString matches)
 // ---------------------------------------------------------------------------
@@ -87,6 +98,7 @@ var envName = '${namePrefix}-cae-${environmentName}'
 var uamiName = '${namePrefix}-uami-${environmentName}'
 var backendName = '${namePrefix}-backend'
 var frontendName = '${namePrefix}-frontend'
+var mcpName = '${namePrefix}-mcp'
 
 // ---------------------------------------------------------------------------
 // Existing resources (created by infra.bicep)
@@ -207,6 +219,42 @@ var backendEnv = concat(
     : []
 )
 
+var mcpSecrets = concat(
+  [
+    {
+      name: 'cosmos-key'
+      keyVaultUrl: '${kvUri}secrets/cosmos-key'
+      identity: uami.id
+    }
+  ],
+  hasMcpApiKeys
+    ? [
+        {
+          name: 'mcp-api-keys'
+          keyVaultUrl: '${kvUri}secrets/mcp-api-keys'
+          identity: uami.id
+        }
+      ]
+    : []
+)
+
+var mcpEnv = concat(
+  [
+    { name: 'COSMOS_ENDPOINT', value: cosmos.properties.documentEndpoint }
+    { name: 'COSMOS_KEY', secretRef: 'cosmos-key' }
+    { name: 'COSMOS_DATABASE', value: cosmosDatabaseName }
+    { name: 'COSMOS_CLASSES_CONTAINER', value: classesContainer }
+    { name: 'COSMOS_INSTANCES_CONTAINER', value: instancesContainer }
+    { name: 'COSMOS_ALLOW_INSECURE', value: 'false' }
+    { name: 'SCAN_BASE_URL', value: 'https://${frontendFqdn}/scan' }
+  ],
+  hasMcpApiKeys
+    ? [
+        { name: 'MCP_API_KEYS', secretRef: 'mcp-api-keys' }
+      ]
+    : []
+)
+
 // ---------------------------------------------------------------------------
 // Container apps
 // ---------------------------------------------------------------------------
@@ -277,7 +325,30 @@ module frontendApp 'modules/containerApp.bicep' = {
   }
 }
 
+module mcpApp 'modules/containerApp.bicep' = {
+  name: 'mcpApp'
+  params: {
+    name: mcpName
+    location: location
+    tags: tags
+    environmentId: caEnv.id
+    userAssignedIdentityId: uami.id
+    acrLoginServer: acrLoginServer
+    image: mcpImage
+    targetPort: mcpTargetPort
+    external: true
+    cpu: mcpCpu
+    memory: mcpMemory
+    minReplicas: mcpMinReplicas
+    maxReplicas: mcpMaxReplicas
+    envVars: mcpEnv
+    secrets: mcpSecrets
+  }
+}
+
 output backendAppName string = backendApp.outputs.name
 output frontendAppName string = frontendApp.outputs.name
 output backendFqdn string = backendApp.outputs.fqdn
 output frontendFqdn string = frontendApp.outputs.fqdn
+output mcpAppName string = mcpApp.outputs.name
+output mcpFqdn string = mcpApp.outputs.fqdn

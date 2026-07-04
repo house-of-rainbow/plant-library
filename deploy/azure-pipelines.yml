@@ -45,6 +45,8 @@ variables:
     value: 'plant-backend'
   - name: frontendImageName
     value: 'plant-frontend'
+  - name: mcpImageName
+    value: 'plant-mcp'
   - name: imageTag
     value: '$(Build.BuildId)'
 
@@ -102,11 +104,13 @@ stages:
                 set_out acrLoginServer acrLoginServer
                 set_out backendAppName backendAppName
                 set_out frontendAppName frontendAppName
+                set_out mcpAppName mcpAppName
                 set_out managedEnvironmentName managedEnvironmentName
             env:
               ENTRA_CLIENT_SECRET: $(ENTRA_CLIENT_SECRET)
               PLANT_DOT_NET__API_KEY: $(PLANT_DOT_NET__API_KEY)
               OPENAI_API_KEY: $(OPENAI_API_KEY)
+              MCP_API_KEYS: $(MCP_API_KEYS)
 
   # -------------------------------------------------------------------------
   - stage: BuildBackend
@@ -159,12 +163,39 @@ stages:
                 docker push "${ACR_LOGIN_SERVER}/$(frontendImageName):$(imageTag)"
 
   # -------------------------------------------------------------------------
+  - stage: BuildMcp
+    displayName: '3b · Build MCP server'
+    dependsOn: []
+    jobs:
+      - job: build
+        pool:
+          vmImage: $(vmImage)
+        steps:
+          - checkout: self
+          - task: AzureCLI@2
+            displayName: 'Build MCP image and push to ACR'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                ACR_NAME=$(jq -r '.acr.name' deploy/config.json)
+                ACR_SUB=$(jq -r '.acr.subscriptionId' deploy/config.json)
+                ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
+                az acr login --name "$ACR_NAME" --subscription "$ACR_SUB"
+                # Build context is the repo root so the MCP image can reuse backend/app.
+                docker build -f mcp/Dockerfile -t "${ACR_LOGIN_SERVER}/$(mcpImageName):$(imageTag)" .
+                docker push "${ACR_LOGIN_SERVER}/$(mcpImageName):$(imageTag)"
+
+  # -------------------------------------------------------------------------
   - stage: DeployApps
     displayName: '4 · Deploy container apps'
     dependsOn:
       - DeployInfrastructure
       - BuildBackend
       - BuildFrontend
+      - BuildMcp
     variables:
       rgName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.rgName'] ]
       acrLoginServer: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrLoginServer'] ]
@@ -192,9 +223,11 @@ stages:
             env:
               BACKEND_IMAGE: '$(acrLoginServer)/$(backendImageName):$(imageTag)'
               FRONTEND_IMAGE: '$(acrLoginServer)/$(frontendImageName):$(imageTag)'
+              MCP_IMAGE: '$(acrLoginServer)/$(mcpImageName):$(imageTag)'
               ENTRA_CLIENT_SECRET: $(ENTRA_CLIENT_SECRET)
               PLANT_DOT_NET__API_KEY: $(PLANT_DOT_NET__API_KEY)
               OPENAI_API_KEY: $(OPENAI_API_KEY)
+              MCP_API_KEYS: $(MCP_API_KEYS)
 
   # -------------------------------------------------------------------------
   # 6 · Custom domains + Cloudflare DNS + Azure managed (ACME) certificates.
@@ -215,6 +248,7 @@ stages:
       rgName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.rgName'] ]
       backendAppName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.backendAppName'] ]
       frontendAppName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.frontendAppName'] ]
+      mcpAppName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.mcpAppName'] ]
       managedEnvironmentName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.managedEnvironmentName'] ]
     jobs:
       - job: customDomains
@@ -248,6 +282,7 @@ stages:
                   case "$1" in
                     frontend) echo "$(frontendAppName)" ;;
                     backend)  echo "$(backendAppName)" ;;
+                    mcp)      echo "$(mcpAppName)" ;;
                     *) echo "" ;;
                   esac
                 }

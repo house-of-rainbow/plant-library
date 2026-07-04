@@ -48,6 +48,10 @@ param plantnetApiKey string = ''
 @secure()
 param openaiApiKey string = ''
 
+@description('Optional MCP API keys, comma-separated GUIDs (injected from a pipeline secret). Stored in Key Vault when provided.')
+@secure()
+param mcpApiKeys string = ''
+
 // Central container registry (pre-existing; not deployed by this template).
 @description('Name of the existing central Azure Container Registry.')
 param acrName string
@@ -73,6 +77,7 @@ var envName = '${namePrefix}-cae-${environmentName}'
 var uamiName = '${namePrefix}-uami-${environmentName}'
 var backendName = '${namePrefix}-backend'
 var frontendName = '${namePrefix}-frontend'
+var mcpName = '${namePrefix}-mcp'
 
 var keyVaultSecretsUserRoleId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
@@ -301,6 +306,14 @@ resource secretOpenai 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empt
   }
 }
 
+resource secretMcp 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(mcpApiKeys)) {
+  parent: keyVault
+  name: 'mcp-api-keys'
+  properties: {
+    value: mcpApiKeys
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Role assignments for the shared managed identity
 //   * AcrPull on the central ACR (module scoped to the ACR's resource group)
@@ -329,5 +342,6 @@ output acrName string = acr.name
 output acrLoginServer string = acr.properties.loginServer
 output backendAppName string = backendName
 output frontendAppName string = frontendName
+output mcpAppName string = mcpName
 #disable-next-line outputs-should-not-contain-secrets
 output customDomainVerificationId string = caEnv.properties.customDomainConfiguration == null ? '' : caEnv.properties.customDomainConfiguration.customDomainVerificationId

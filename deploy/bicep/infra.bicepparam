@@ -25,3 +25,4 @@ param acrSubscriptionId = config.acr.subscriptionId
 param entraClientSecret = readEnvironmentVariable('ENTRA_CLIENT_SECRET', '')
 param plantnetApiKey = readEnvironmentVariable('PLANT_DOT_NET__API_KEY', '')
 param openaiApiKey = readEnvironmentVariable('OPENAI_API_KEY', '')
+param mcpApiKeys = readEnvironmentVariable('MCP_API_KEYS', '')

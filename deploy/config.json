@@ -38,6 +38,13 @@
     "maxReplicas": 1,
     "targetPort": 80
   },
+  "mcp": {
+    "cpu": "0.5",
+    "memory": "1.0Gi",
+    "minReplicas": 0,
+    "maxReplicas": 1,
+    "targetPort": 8000
+  },
   "auth": {
     "authDisabled": false,
     "entraTenantId": "14268b2a-8744-4ef9-9db8-ecb707139451",
@@ -51,6 +58,12 @@
       {
         "app": "frontend",
         "dnsName": "plants.burienstation.com",
+        "cloudflareZoneName": "burienstation.com",
+        "cloudflareZoneId": "a6481fa6d80bfe0429b54ba896f648c3"
+      },
+      {
+        "app": "mcp",
+        "dnsName": "plants.mcp.burienstation.com",
         "cloudflareZoneName": "burienstation.com",
         "cloudflareZoneId": "a6481fa6d80bfe0429b54ba896f648c3"
       }

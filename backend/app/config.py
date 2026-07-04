@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     openai_model: str = "gpt-4o"
 
+    # MCP server API keys (comma-separated GUIDs; any listed key is valid)
+    mcp_api_keys: str = ""
+
+    @property
+    def mcp_api_keys_list(self) -> list[str]:
+        return [k.strip() for k in self.mcp_api_keys.split(",") if k.strip()]
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
