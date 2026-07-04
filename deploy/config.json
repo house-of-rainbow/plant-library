@@ -16,6 +16,10 @@
   "storage": {
     "blobContainerName": "plant-images"
   },
+  "acr": {
+    "name": "REPLACE_WITH_CENTRAL_ACR_NAME",
+    "resourceGroup": "REPLACE_WITH_CENTRAL_ACR_RESOURCE_GROUP"
+  },
   "backend": {
     "cpu": "2",
     "memory": "4.0Gi",

@@ -1,6 +1,6 @@
 // Reusable Container App module (used for both backend and frontend).
-// The app is created with a system-assigned identity so it can pull images
-// from ACR once the AcrPull role is granted by the parent template.
+// The app runs under a user-assigned managed identity that already has AcrPull
+// on the registry and access to the Key Vault secrets it references.
 
 @description('Container App name.')
 param name string
@@ -13,6 +13,9 @@ param tags object = {}
 
 @description('Resource id of the Container Apps managed environment.')
 param environmentId string
+
+@description('Resource id of the user-assigned managed identity for ACR pull + KV access.')
+param userAssignedIdentityId string
 
 @description('ACR login server (e.g. myregistry.azurecr.io). Empty to skip registry config.')
 param acrLoginServer string = ''
@@ -38,16 +41,18 @@ param maxReplicas int = 3
 @description('Environment variables. Each item is { name, value } or { name, secretRef }.')
 param envVars array = []
 
-@description('Secrets as an object map of name -> value.')
-@secure()
-param secrets object = {}
+@description('Container App secrets. Each item is a Key Vault reference: { name, keyVaultUrl, identity }.')
+param secrets array = []
 
 resource app 'Microsoft.App/containerApps@2024-03-01' = {
   name: name
   location: location
   tags: tags
   identity: {
-    type: 'SystemAssigned'
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${userAssignedIdentityId}': {}
+    }
   }
   properties: {
     managedEnvironmentId: environmentId
@@ -64,16 +69,10 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         : [
             {
               server: acrLoginServer
-              identity: 'system'
+              identity: userAssignedIdentityId
             }
           ]
-      secrets: [
-        for s in items(secrets): {
-          name: s.key
-          #disable-next-line use-secure-value-for-secure-inputs
-          value: s.value
-        }
-      ]
+      secrets: secrets
     }
     template: {
       containers: [
@@ -96,5 +95,4 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
 }
 
 output name string = app.name
-output principalId string = app.identity.principalId
 output fqdn string = app.properties.configuration.ingress.fqdn
