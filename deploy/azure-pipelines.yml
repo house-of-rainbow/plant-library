@@ -29,6 +29,7 @@ trigger:
 
 variables:
   - group: cloudflare-api # provides the secret CLOUDFLARE_API_TOKEN (used by the CustomDomains stage)
+  - group: plant-library-secrets # provides the secret ENTRA_CLIENT_SECRET (used by the DeployInfrastructure stage)
   - name: azureServiceConnection
     value: 'plant-library-sc' # <-- set to your ARM service connection name
   - name: vmImage
