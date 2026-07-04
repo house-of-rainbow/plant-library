@@ -23,6 +23,7 @@ param authDisabled = config.auth.authDisabled
 param entraTenantId = config.auth.entraTenantId
 param entraClientId = config.auth.entraClientId
 param entraApiAudience = config.auth.entraApiAudience
+param entraApiScope = config.auth.entraApiScope
 
 param backendCpu = config.backend.cpu
 param backendMemory = config.backend.memory

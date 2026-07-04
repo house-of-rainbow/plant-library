@@ -43,6 +43,9 @@ param entraTenantId string
 param entraClientId string
 param entraApiAudience string
 
+@description('API scope the SPA requests (e.g. api://<clientId>/access_as_user).')
+param entraApiScope string = ''
+
 @description('Whether an entra-client-secret exists in Key Vault (set by the pipeline).')
 param hasEntraSecret bool = false
 
@@ -212,6 +215,22 @@ module frontendApp 'modules/containerApp.bicep' = {
         // Upstream host used by nginx for SNI + the Host header (ACA routing).
         name: 'BACKEND_HOST'
         value: backendFqdn
+      }
+      {
+        name: 'AUTH_DISABLED'
+        value: authDisabled ? 'true' : 'false'
+      }
+      {
+        name: 'ENTRA_CLIENT_ID'
+        value: entraClientId
+      }
+      {
+        name: 'ENTRA_TENANT_ID'
+        value: entraTenantId
+      }
+      {
+        name: 'ENTRA_API_SCOPE'
+        value: entraApiScope
       }
     ]
   }

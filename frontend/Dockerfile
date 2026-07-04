@@ -12,6 +12,14 @@ FROM nginx:1.27-alpine
 # BACKEND_HOST is the upstream hostname used for SNI + the Host header.
 ENV BACKEND_URL=http://backend:8000
 ENV BACKEND_HOST=backend
+# Auth defaults (auth off unless the runtime env sets otherwise). Non-secret.
+ENV AUTH_DISABLED=false
+ENV ENTRA_CLIENT_ID=""
+ENV ENTRA_TENANT_ID="common"
+ENV ENTRA_API_SCOPE=""
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+# Generates /config.js from the auth env vars at container start.
+COPY docker/40-app-config.sh /docker-entrypoint.d/40-app-config.sh
+RUN chmod +x /docker-entrypoint.d/40-app-config.sh
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80

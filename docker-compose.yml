@@ -48,6 +48,7 @@ services:
     environment:
       BACKEND_URL: http://backend:8000
       BACKEND_HOST: backend
+      AUTH_DISABLED: "true"
     ports:
       - "3000:80"
     depends_on:
