@@ -16,6 +16,9 @@
   "storage": {
     "blobContainerName": "plant-images"
   },
+  "openai": {
+    "model": "gpt-4o"
+  },
   "acr": {
     "name": "fbreg",
     "resourceGroup": "shared-services",

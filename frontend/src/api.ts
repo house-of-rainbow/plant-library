@@ -120,6 +120,7 @@ export interface IdentifyCandidate {
 export interface IdentifyResponse {
   best_match?: string | null;
   remaining_requests?: number | null;
+  source?: string | null;
   candidates: IdentifyCandidate[];
 }
 

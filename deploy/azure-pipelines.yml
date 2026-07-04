@@ -36,6 +36,7 @@ trigger:
 variables:
   - group: cloudflare-api # provides the secret CLOUDFLARE_API_TOKEN (used by the CustomDomains stage)
   - group: plant-library-secrets # provides the secret ENTRA_CLIENT_SECRET (used by the DeployInfrastructure stage)
+  - group: plants-external-services
   - name: azureServiceConnection
     value: 'sc-sp-DEPLOY-plant-library' # <-- set to your ARM service connection name
   - name: vmImage
@@ -105,6 +106,7 @@ stages:
             env:
               ENTRA_CLIENT_SECRET: $(ENTRA_CLIENT_SECRET)
               PLANT_DOT_NET__API_KEY: $(PLANT_DOT_NET__API_KEY)
+              OPENAI_API_KEY: $(OPENAI_API_KEY)
 
   # -------------------------------------------------------------------------
   - stage: BuildBackend
@@ -192,6 +194,7 @@ stages:
               FRONTEND_IMAGE: '$(acrLoginServer)/$(frontendImageName):$(imageTag)'
               ENTRA_CLIENT_SECRET: $(ENTRA_CLIENT_SECRET)
               PLANT_DOT_NET__API_KEY: $(PLANT_DOT_NET__API_KEY)
+              OPENAI_API_KEY: $(OPENAI_API_KEY)
 
   # -------------------------------------------------------------------------
   # 6 · Custom domains + Cloudflare DNS + Azure managed (ACME) certificates.

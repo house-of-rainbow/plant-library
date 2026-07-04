@@ -98,6 +98,7 @@ export default function IdentifyModal({
             candidate.scientific_name_without_author || candidate.scientific_name,
           family: candidate.family || undefined,
           genus: candidate.genus || undefined,
+          hero_image_url: candidate.image_url || undefined,
           care_defaults: {},
         } as Partial<PlantClass>);
         qc.invalidateQueries({ queryKey: ["classes"] });
@@ -180,6 +181,11 @@ export default function IdentifyModal({
             {/* Results */}
             {result && (
               <div className="space-y-2">
+                {result.source === "openai" && result.candidates.length > 0 && (
+                  <p className="text-xs text-white/40">
+                    ✨ Identified by AI (Pl@ntNet unavailable) — double-check the match.
+                  </p>
+                )}
                 {result.candidates.length === 0 && (
                   <p className="text-sm text-white/60">
                     No confident match. Try clearer photos of leaves or flowers.

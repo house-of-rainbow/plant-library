@@ -19,6 +19,10 @@ server {
     location /api/ {
         proxy_pass ${BACKEND_URL};
         proxy_http_version 1.1;
+        # Allow multi-photo identify/upload payloads (Pl@ntNet accepts up to 50MB).
+        client_max_body_size 55m;
+        proxy_request_buffering off;
+        proxy_read_timeout 120s;
         proxy_set_header Host ${BACKEND_HOST};
         proxy_ssl_server_name on;
         proxy_ssl_name ${BACKEND_HOST};

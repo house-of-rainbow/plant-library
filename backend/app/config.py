@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     plantnet_api_key: str = Field(default="", validation_alias="PLANT_DOT_NET__API_KEY")
     plantnet_base_url: str = "https://my-api.plantnet.org"
 
+    # OpenAI vision fallback for identification (used when Pl@ntNet fails)
+    openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
+    openai_model: str = "gpt-4o"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

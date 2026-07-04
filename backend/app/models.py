@@ -82,13 +82,22 @@ class CareDefaults(BaseModel):
     """
 
     watering_interval_days: Optional[int] = Field(default=None, ge=0)
+    watering_notes: Optional[str] = None
     sunlight: Optional[SunlightLevel] = None
+    light_notes: Optional[str] = None
     fertilizing_interval_days: Optional[int] = Field(default=None, ge=0)
+    fertilizer_type: Optional[str] = None
+    fertilizer_notes: Optional[str] = None
     repotting_interval_months: Optional[int] = Field(default=None, ge=0)
     soil_type: Optional[str] = None
     pot_size: Optional[str] = None
     humidity: Optional[HumidityRange] = None
     temperature: Optional[TemperatureRange] = None
+    hardiness_zone: Optional[str] = None
+    mature_size: Optional[str] = None
+    pruning_notes: Optional[str] = None
+    propagation_notes: Optional[str] = None
+    pests_notes: Optional[str] = None
     toxic_to_pets: Optional[bool] = None
     care_notes: Optional[str] = None
 

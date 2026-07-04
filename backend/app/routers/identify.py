@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from ..auth import CurrentUser, get_current_user
 from ..config import Settings, get_settings
+from ..openai_identify import identify_with_openai
 
 logger = logging.getLogger("plantlibrary.identify")
 
@@ -40,6 +41,7 @@ class IdentifyCandidate(BaseModel):
 class IdentifyResponse(BaseModel):
     best_match: Optional[str] = None
     remaining_requests: Optional[int] = None
+    source: Optional[str] = None  # "plantnet" | "openai"
     candidates: list[IdentifyCandidate] = []
 
 
@@ -82,49 +84,27 @@ def _parse_results(payload: dict) -> IdentifyResponse:
     return IdentifyResponse(
         best_match=payload.get("bestMatch"),
         remaining_requests=payload.get("remainingIdentificationRequests"),
+        source="plantnet",
         candidates=candidates,
     )
 
 
-@router.post("", response_model=IdentifyResponse)
-async def identify(
-    images: list[UploadFile] = File(...),
-    organs: list[str] | None = Form(default=None),
-    settings: Settings = Depends(get_settings),
-    _: CurrentUser = Depends(get_current_user),
-):
+async def _try_plantnet(
+    raw: list[tuple[str, bytes, str]],
+    organs: list[str] | None,
+    settings: Settings,
+) -> tuple[Optional[IdentifyResponse], bool]:
+    """Attempt Pl@ntNet identification.
+
+    Returns ``(result, failed)``: ``result`` is the parsed response (possibly
+    with zero candidates) when Pl@ntNet responded; ``failed`` is True when the
+    service was unavailable/errored so the caller should fall back.
+    """
     if not settings.plantnet_api_key:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Plant identification is not configured (missing PLANT_DOT_NET__API_KEY).",
-        )
-    if not 1 <= len(images) <= _MAX_IMAGES:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"Provide between 1 and {_MAX_IMAGES} images.",
-        )
+        return None, True
 
-    files: list[tuple[str, tuple[str, bytes, str]]] = []
-    for img in images:
-        content_type = img.content_type or "image/jpeg"
-        if content_type not in _ALLOWED_CONTENT_TYPES:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                f"Unsupported image type: {content_type}",
-            )
-        data = await img.read()
-        files.append(("images", (img.filename or "image.jpg", data, content_type)))
-
-    # Organs must be omitted or match the number of images; default is "auto".
-    form_data: list[tuple[str, str]] = []
-    if organs:
-        if len(organs) != len(images):
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "The number of organs must match the number of images.",
-            )
-        form_data = [("organs", o) for o in organs]
-
+    files = [("images", (fn, data, ct)) for fn, data, ct in raw]
+    form_data = [("organs", o) for o in organs] if organs else []
     params = {
         "api-key": settings.plantnet_api_key,
         "nb-results": 5,
@@ -138,26 +118,101 @@ async def identify(
             resp = await client.post(url, params=params, files=files, data=form_data)
     except httpx.HTTPError as exc:
         logger.warning("Pl@ntNet request failed: %s", exc)
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, "Identification service is unavailable."
-        ) from exc
+        return None, True
 
+    if resp.status_code == 200:
+        return _parse_results(resp.json()), False
     if resp.status_code == 404:
-        # No species matched — return an empty (but successful) result.
-        return IdentifyResponse(candidates=[])
-    if resp.status_code == 401:
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, "Identification service rejected the API key."
+        # Responded, but no species matched.
+        return IdentifyResponse(candidates=[], source="plantnet"), False
+
+    logger.warning("Pl@ntNet error %s: %s", resp.status_code, resp.text[:300])
+    return None, True
+
+
+async def _try_openai(
+    raw: list[tuple[str, bytes, str]],
+    settings: Settings,
+) -> Optional[IdentifyResponse]:
+    """Fallback identification via the OpenAI Responses API (Structured Outputs)."""
+    if not settings.openai_api_key:
+        return None
+    try:
+        llm = await identify_with_openai(
+            [(data, ct) for _, data, ct in raw],
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
         )
-    if resp.status_code == 429:
-        raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "Identification quota exceeded. Please try again later.",
+    except Exception as exc:  # noqa: BLE001 - never let the fallback crash the request
+        logger.warning("OpenAI identify failed: %s", exc)
+        return None
+
+    candidates = [
+        IdentifyCandidate(
+            scientific_name=c.scientific_name,
+            scientific_name_without_author=c.scientific_name,
+            common_name=c.common_name,
+            common_names=[c.common_name] if c.common_name else [],
+            genus=c.genus,
+            family=c.family,
+            score=max(0.0, min(1.0, c.confidence)),
         )
-    if resp.status_code >= 400:
-        logger.warning("Pl@ntNet error %s: %s", resp.status_code, resp.text[:500])
+        for c in llm.candidates
+    ]
+    return IdentifyResponse(source="openai", candidates=candidates)
+
+
+@router.post("", response_model=IdentifyResponse)
+async def identify(
+    images: list[UploadFile] = File(...),
+    organs: list[str] | None = Form(default=None),
+    settings: Settings = Depends(get_settings),
+    _: CurrentUser = Depends(get_current_user),
+):
+    if not settings.plantnet_api_key and not settings.openai_api_key:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, "Identification service returned an error."
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Plant identification is not configured.",
+        )
+    if not 1 <= len(images) <= _MAX_IMAGES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Provide between 1 and {_MAX_IMAGES} images.",
+        )
+    if organs and len(organs) != len(images):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "The number of organs must match the number of images.",
         )
 
-    return _parse_results(resp.json())
+    raw: list[tuple[str, bytes, str]] = []
+    for img in images:
+        content_type = img.content_type or "image/jpeg"
+        if content_type not in _ALLOWED_CONTENT_TYPES:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Unsupported image type: {content_type}",
+            )
+        data = await img.read()
+        raw.append((img.filename or "image.jpg", data, content_type))
+
+    # Primary: Pl@ntNet.
+    result, failed = await _try_plantnet(raw, organs, settings)
+    if result and result.candidates:
+        return result
+
+    # Fallback: OpenAI vision, when Pl@ntNet failed OR returned no candidates.
+    fallback = await _try_openai(raw, settings)
+    if fallback is not None and (failed or not result or not result.candidates):
+        # Prefer the fallback when it produced something, else keep whatever we have.
+        if fallback.candidates or result is None:
+            return fallback
+
+    if result is not None:
+        return result  # Pl@ntNet responded (possibly empty)
+    if fallback is not None:
+        return fallback  # empty fallback
+    raise HTTPException(
+        status.HTTP_502_BAD_GATEWAY, "Identification services are unavailable."
+    )
+

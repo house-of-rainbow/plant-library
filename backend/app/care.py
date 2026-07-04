@@ -18,27 +18,18 @@ def _merge_field(instance_val, class_val):
 
 
 def effective_care(instance: PlantInstance, plant_class: PlantClass | None) -> CareDefaults:
-    """Combine instance overrides on top of the owning class defaults."""
+    """Combine instance overrides on top of the owning class defaults.
+
+    Every ``CareDefaults`` field is merged the same way: an instance value wins
+    when set (not None), otherwise the class default is used.
+    """
     defaults = plant_class.care_defaults if plant_class else CareDefaults()
     overrides = instance.care_overrides
-    return CareDefaults(
-        watering_interval_days=_merge_field(
-            overrides.watering_interval_days, defaults.watering_interval_days
-        ),
-        sunlight=_merge_field(overrides.sunlight, defaults.sunlight),
-        fertilizing_interval_days=_merge_field(
-            overrides.fertilizing_interval_days, defaults.fertilizing_interval_days
-        ),
-        repotting_interval_months=_merge_field(
-            overrides.repotting_interval_months, defaults.repotting_interval_months
-        ),
-        soil_type=_merge_field(overrides.soil_type, defaults.soil_type),
-        pot_size=_merge_field(overrides.pot_size, defaults.pot_size),
-        humidity=_merge_field(overrides.humidity, defaults.humidity),
-        temperature=_merge_field(overrides.temperature, defaults.temperature),
-        toxic_to_pets=_merge_field(overrides.toxic_to_pets, defaults.toxic_to_pets),
-        care_notes=_merge_field(overrides.care_notes, defaults.care_notes),
-    )
+    merged = {
+        field: _merge_field(getattr(overrides, field), getattr(defaults, field))
+        for field in CareDefaults.model_fields
+    }
+    return CareDefaults(**merged)
 
 
 def _due(last: datetime | None, interval_days: int | None) -> tuple[date | None, bool, int | None]:

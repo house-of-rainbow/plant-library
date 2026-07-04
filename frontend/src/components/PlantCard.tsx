@@ -15,7 +15,7 @@ export default function PlantCard({
   const meta = HEALTH_META[plant.health_status];
   const title = plant.nickname || plant.plant_class?.common_name || "Unnamed plant";
   const overdue = plant.care_status.watering_overdue;
-  const cover = plant.image_urls[0];
+  const cover = plant.image_urls[0] || plant.plant_class?.hero_image_url || null;
 
   return (
     <motion.button

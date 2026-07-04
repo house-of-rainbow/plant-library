@@ -2,10 +2,11 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { dashboardApi, instancesApi } from "../api";
+import { classesApi, dashboardApi, instancesApi } from "../api";
 import type { PlantInstance } from "../types";
 import { HEALTH_META, relativeDays } from "../lib/format";
 import QrScanner from "../components/QrScanner";
+import IdentifyModal from "../components/IdentifyModal";
 
 function CareRow({ plant }: { plant: PlantInstance }) {
   const qc = useQueryClient();
@@ -62,7 +63,23 @@ function CareRow({ plant }: { plant: PlantInstance }) {
 
 export default function OperationsPage() {
   const [scanning, setScanning] = useState(false);
+  const [identifyOpen, setIdentifyOpen] = useState(false);
+  const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["ops-summary"], queryFn: dashboardApi.summary });
+  const { data: classes = [] } = useQuery({ queryKey: ["classes"], queryFn: classesApi.list });
+
+  // Snap → identify → create the plant → jump to its detail to fill in the rest.
+  const quickAdd = useMutation({
+    mutationFn: ({ classId, imageUrls }: { classId: string; imageUrls: string[] }) =>
+      instancesApi.create({ class_id: classId, health_status: "healthy", image_urls: imageUrls }),
+    onSuccess: (plant) => {
+      qc.invalidateQueries({ queryKey: ["instances"] });
+      qc.invalidateQueries({ queryKey: ["ops-summary"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      navigate(`/plants/${plant.id}`);
+    },
+  });
 
   const queue = useMemo(() => {
     if (!data) return [];
@@ -89,6 +106,14 @@ export default function OperationsPage() {
         <span className="text-2xl">📷</span> Scan a plant label
       </motion.button>
 
+      <motion.button
+        whileTap={{ scale: 0.97 }}
+        onClick={() => setIdentifyOpen(true)}
+        className="w-full glass p-6 flex items-center justify-center gap-3 text-lg font-semibold"
+      >
+        <span className="text-2xl">🔍</span> Identify &amp; add a plant
+      </motion.button>
+
       {queue.length === 0 ? (
         <div className="glass p-10 text-center">
           <div className="text-5xl mb-3">✨</div>
@@ -104,6 +129,12 @@ export default function OperationsPage() {
       )}
 
       {scanning && <QrScanner onClose={() => setScanning(false)} />}
+      <IdentifyModal
+        classes={classes}
+        open={identifyOpen}
+        onClose={() => setIdentifyOpen(false)}
+        onUse={(r) => quickAdd.mutate(r)}
+      />
     </div>
   );
 }

@@ -32,13 +32,22 @@ export interface HumidityRange {
 
 export interface CareDefaults {
   watering_interval_days?: number | null;
+  watering_notes?: string | null;
   sunlight?: SunlightLevel | null;
+  light_notes?: string | null;
   fertilizing_interval_days?: number | null;
+  fertilizer_type?: string | null;
+  fertilizer_notes?: string | null;
   repotting_interval_months?: number | null;
   soil_type?: string | null;
   pot_size?: string | null;
   humidity?: HumidityRange | null;
   temperature?: TemperatureRange | null;
+  hardiness_zone?: string | null;
+  mature_size?: string | null;
+  pruning_notes?: string | null;
+  propagation_notes?: string | null;
+  pests_notes?: string | null;
   toxic_to_pets?: boolean | null;
   care_notes?: string | null;
 }

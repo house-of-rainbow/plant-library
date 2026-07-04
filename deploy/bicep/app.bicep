@@ -52,6 +52,12 @@ param hasEntraSecret bool = false
 @description('Whether a plantnet-api-key exists in Key Vault (set by the pipeline).')
 param hasPlantnetKey bool = false
 
+@description('Whether an openai-api-key exists in Key Vault (set by the pipeline).')
+param hasOpenaiKey bool = false
+
+@description('OpenAI model used for the identification fallback.')
+param openaiModel string = 'gpt-4o'
+
 // Images (set by the release pipeline; default placeholder for a dry run)
 param backendImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
 param frontendImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
@@ -149,6 +155,15 @@ var backendSecrets = concat(
           identity: uami.id
         }
       ]
+    : [],
+  hasOpenaiKey
+    ? [
+        {
+          name: 'openai-api-key'
+          keyVaultUrl: '${kvUri}secrets/openai-api-key'
+          identity: uami.id
+        }
+      ]
     : []
 )
 
@@ -182,6 +197,12 @@ var backendEnv = concat(
   hasPlantnetKey
     ? [
         { name: 'PLANT_DOT_NET__API_KEY', secretRef: 'plantnet-api-key' }
+      ]
+    : [],
+  hasOpenaiKey
+    ? [
+        { name: 'OPENAI_API_KEY', secretRef: 'openai-api-key' }
+        { name: 'OPENAI_MODEL', value: openaiModel }
       ]
     : []
 )

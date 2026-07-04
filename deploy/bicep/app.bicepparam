@@ -42,3 +42,5 @@ param backendImage = readEnvironmentVariable('BACKEND_IMAGE', 'mcr.microsoft.com
 param frontendImage = readEnvironmentVariable('FRONTEND_IMAGE', 'mcr.microsoft.com/k8se/quickstart:latest')
 param hasEntraSecret = !empty(readEnvironmentVariable('ENTRA_CLIENT_SECRET', ''))
 param hasPlantnetKey = !empty(readEnvironmentVariable('PLANT_DOT_NET__API_KEY', ''))
+param hasOpenaiKey = !empty(readEnvironmentVariable('OPENAI_API_KEY', ''))
+param openaiModel = config.openai.model

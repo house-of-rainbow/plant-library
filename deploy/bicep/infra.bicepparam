@@ -24,3 +24,4 @@ param acrSubscriptionId = config.acr.subscriptionId
 // Injected by the pipeline (secure). Empty locally.
 param entraClientSecret = readEnvironmentVariable('ENTRA_CLIENT_SECRET', '')
 param plantnetApiKey = readEnvironmentVariable('PLANT_DOT_NET__API_KEY', '')
+param openaiApiKey = readEnvironmentVariable('OPENAI_API_KEY', '')

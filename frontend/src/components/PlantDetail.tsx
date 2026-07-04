@@ -42,7 +42,7 @@ export default function PlantDetail({
     },
   });
 
-  const cover = plant.image_urls[0];
+  const cover = plant.image_urls[0] || plant.plant_class?.hero_image_url || null;
 
   return (
     <div className={`space-y-6 ${compact ? "" : "sm:space-y-8"}`}>
@@ -125,6 +125,17 @@ export default function PlantDetail({
           </div>
         </div>
         <div className="glass-soft p-4">
+          <div className="text-xs uppercase tracking-wider text-white/40">Fertilizing</div>
+          <div className="text-lg font-semibold">
+            {care.fertilizing_interval_days
+              ? `Every ${care.fertilizing_interval_days}d`
+              : "—"}
+          </div>
+          {care.fertilizer_type && (
+            <div className="text-xs text-white/40">{care.fertilizer_type}</div>
+          )}
+        </div>
+        <div className="glass-soft p-4">
           <div className="text-xs uppercase tracking-wider text-white/40">Location</div>
           <div className="text-lg font-semibold">{plant.location || "—"}</div>
         </div>
@@ -140,6 +151,41 @@ export default function PlantDetail({
           <p className="text-white/80">{care.care_notes}</p>
         </div>
       )}
+
+      {(() => {
+        const details: [string, string | null | undefined][] = [
+          ["Fertilizer", care.fertilizer_notes],
+          ["Watering", care.watering_notes],
+          ["Light", care.light_notes],
+          ["Soil", care.soil_type],
+          ["Pot size", plant.pot_size || care.pot_size],
+          ["Mature size", care.mature_size],
+          ["Hardiness zone", care.hardiness_zone],
+          ["Pruning", care.pruning_notes],
+          ["Propagation", care.propagation_notes],
+          ["Pests & treatments", care.pests_notes],
+        ];
+        const shown = details.filter(([, v]) => !!v);
+        if (!shown.length && !care.toxic_to_pets) return null;
+        return (
+          <div className="glass-soft p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-display text-lg font-semibold">Care details</h3>
+              {care.toxic_to_pets && (
+                <span className="pill bg-red-500/15 text-red-300">☠️ Toxic to pets</span>
+              )}
+            </div>
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+              {shown.map(([k, v]) => (
+                <div key={k}>
+                  <dt className="text-xs uppercase tracking-wider text-white/40">{k}</dt>
+                  <dd className="text-white/80 text-sm whitespace-pre-wrap">{v}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        );
+      })()}
 
       {/* Event log */}
       <div className="glass-soft p-5">

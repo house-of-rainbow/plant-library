@@ -11,12 +11,25 @@ interface FormState {
   common_name: string;
   scientific_name: string;
   family: string;
+  genus: string;
   description: string;
+  hero_image_url: string;
   watering_interval_days: string;
+  watering_notes: string;
   fertilizing_interval_days: string;
+  fertilizer_type: string;
+  fertilizer_notes: string;
   repotting_interval_months: string;
   sunlight: SunlightLevel | "";
+  light_notes: string;
   soil_type: string;
+  pot_size: string;
+  hardiness_zone: string;
+  mature_size: string;
+  pruning_notes: string;
+  propagation_notes: string;
+  pests_notes: string;
+  care_notes: string;
   toxic_to_pets: boolean;
 }
 
@@ -24,28 +37,55 @@ const EMPTY: FormState = {
   common_name: "",
   scientific_name: "",
   family: "",
+  genus: "",
   description: "",
+  hero_image_url: "",
   watering_interval_days: "",
+  watering_notes: "",
   fertilizing_interval_days: "",
+  fertilizer_type: "",
+  fertilizer_notes: "",
   repotting_interval_months: "",
   sunlight: "",
+  light_notes: "",
   soil_type: "",
+  pot_size: "",
+  hardiness_zone: "",
+  mature_size: "",
+  pruning_notes: "",
+  propagation_notes: "",
+  pests_notes: "",
+  care_notes: "",
   toxic_to_pets: false,
 };
 
 function toPayload(f: FormState): Partial<PlantClass> {
   const num = (v: string) => (v.trim() === "" ? null : Number(v));
+  const str = (v: string) => (v.trim() === "" ? null : v.trim());
   return {
     common_name: f.common_name.trim(),
-    scientific_name: f.scientific_name || null,
-    family: f.family || null,
-    description: f.description || null,
+    scientific_name: str(f.scientific_name),
+    family: str(f.family),
+    genus: str(f.genus),
+    description: str(f.description),
+    hero_image_url: str(f.hero_image_url),
     care_defaults: {
       watering_interval_days: num(f.watering_interval_days),
+      watering_notes: str(f.watering_notes),
       fertilizing_interval_days: num(f.fertilizing_interval_days),
+      fertilizer_type: str(f.fertilizer_type),
+      fertilizer_notes: str(f.fertilizer_notes),
       repotting_interval_months: num(f.repotting_interval_months),
       sunlight: f.sunlight || null,
-      soil_type: f.soil_type || null,
+      light_notes: str(f.light_notes),
+      soil_type: str(f.soil_type),
+      pot_size: str(f.pot_size),
+      hardiness_zone: str(f.hardiness_zone),
+      mature_size: str(f.mature_size),
+      pruning_notes: str(f.pruning_notes),
+      propagation_notes: str(f.propagation_notes),
+      pests_notes: str(f.pests_notes),
+      care_notes: str(f.care_notes),
       toxic_to_pets: f.toxic_to_pets,
     },
   };
@@ -91,12 +131,25 @@ export default function SpeciesPage() {
       common_name: c.common_name,
       scientific_name: c.scientific_name ?? "",
       family: c.family ?? "",
+      genus: c.genus ?? "",
       description: c.description ?? "",
+      hero_image_url: c.hero_image_url ?? "",
       watering_interval_days: d.watering_interval_days?.toString() ?? "",
+      watering_notes: d.watering_notes ?? "",
       fertilizing_interval_days: d.fertilizing_interval_days?.toString() ?? "",
+      fertilizer_type: d.fertilizer_type ?? "",
+      fertilizer_notes: d.fertilizer_notes ?? "",
       repotting_interval_months: d.repotting_interval_months?.toString() ?? "",
       sunlight: d.sunlight ?? "",
+      light_notes: d.light_notes ?? "",
       soil_type: d.soil_type ?? "",
+      pot_size: d.pot_size ?? "",
+      hardiness_zone: d.hardiness_zone ?? "",
+      mature_size: d.mature_size ?? "",
+      pruning_notes: d.pruning_notes ?? "",
+      propagation_notes: d.propagation_notes ?? "",
+      pests_notes: d.pests_notes ?? "",
+      care_notes: d.care_notes ?? "",
       toxic_to_pets: !!d.toxic_to_pets,
     });
     setOpen(true);
@@ -278,6 +331,141 @@ export default function SpeciesPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Genus</label>
+                  <input
+                    className="input"
+                    value={form.genus}
+                    onChange={(e) => setForm({ ...form, genus: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Hardiness zone</label>
+                  <input
+                    className="input"
+                    value={form.hardiness_zone}
+                    onChange={(e) => setForm({ ...form, hardiness_zone: e.target.value })}
+                    placeholder="e.g. 10-12"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Soil</label>
+                  <input
+                    className="input"
+                    value={form.soil_type}
+                    onChange={(e) => setForm({ ...form, soil_type: e.target.value })}
+                    placeholder="Well-draining aroid mix"
+                  />
+                </div>
+                <div>
+                  <label className="label">Pot size</label>
+                  <input
+                    className="input"
+                    value={form.pot_size}
+                    onChange={(e) => setForm({ ...form, pot_size: e.target.value })}
+                    placeholder='6"'
+                  />
+                </div>
+              </div>
+
+              <div className="pt-1 text-xs uppercase tracking-wider text-canopy-300/70">
+                Fertilizer
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Type</label>
+                  <input
+                    className="input"
+                    value={form.fertilizer_type}
+                    onChange={(e) => setForm({ ...form, fertilizer_type: e.target.value })}
+                    placeholder="Balanced 10-10-10, liquid…"
+                  />
+                </div>
+                <div>
+                  <label className="label">Mature size</label>
+                  <input
+                    className="input"
+                    value={form.mature_size}
+                    onChange={(e) => setForm({ ...form, mature_size: e.target.value })}
+                    placeholder="Up to 3m"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Fertilizer notes</label>
+                <textarea
+                  className="input min-h-[60px]"
+                  value={form.fertilizer_notes}
+                  onChange={(e) => setForm({ ...form, fertilizer_notes: e.target.value })}
+                  placeholder="Feed monthly during spring/summer; dilute to half strength."
+                />
+              </div>
+
+              <div className="pt-1 text-xs uppercase tracking-wider text-canopy-300/70">
+                Care notes
+              </div>
+              <div>
+                <label className="label">Watering notes</label>
+                <textarea
+                  className="input min-h-[60px]"
+                  value={form.watering_notes}
+                  onChange={(e) => setForm({ ...form, watering_notes: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Light notes</label>
+                <input
+                  className="input"
+                  value={form.light_notes}
+                  onChange={(e) => setForm({ ...form, light_notes: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Pruning notes</label>
+                <textarea
+                  className="input min-h-[60px]"
+                  value={form.pruning_notes}
+                  onChange={(e) => setForm({ ...form, pruning_notes: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Propagation notes</label>
+                <textarea
+                  className="input min-h-[60px]"
+                  value={form.propagation_notes}
+                  onChange={(e) => setForm({ ...form, propagation_notes: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Pests &amp; treatments</label>
+                <textarea
+                  className="input min-h-[60px]"
+                  value={form.pests_notes}
+                  onChange={(e) => setForm({ ...form, pests_notes: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">General care notes</label>
+                <textarea
+                  className="input min-h-[60px]"
+                  value={form.care_notes}
+                  onChange={(e) => setForm({ ...form, care_notes: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Hero image URL</label>
+                <input
+                  className="input"
+                  value={form.hero_image_url}
+                  onChange={(e) => setForm({ ...form, hero_image_url: e.target.value })}
+                  placeholder="https://…"
+                />
               </div>
 
               <div>

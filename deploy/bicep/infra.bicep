@@ -44,6 +44,10 @@ param entraClientSecret string = ''
 @secure()
 param plantnetApiKey string = ''
 
+@description('Optional OpenAI API key (injected from a pipeline secret). Stored in Key Vault when provided.')
+@secure()
+param openaiApiKey string = ''
+
 // Central container registry (pre-existing; not deployed by this template).
 @description('Name of the existing central Azure Container Registry.')
 param acrName string
@@ -286,6 +290,14 @@ resource secretPlantnet 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!em
   name: 'plantnet-api-key'
   properties: {
     value: plantnetApiKey
+  }
+}
+
+resource secretOpenai 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(openaiApiKey)) {
+  parent: keyVault
+  name: 'openai-api-key'
+  properties: {
+    value: openaiApiKey
   }
 }
 
