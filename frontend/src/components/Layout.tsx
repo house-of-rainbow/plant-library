@@ -1,6 +1,8 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import AmbientScene from "../three/AmbientScene";
+import AccountMenu from "./AccountMenu";
+import { appConfig } from "../config";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: "◎", end: true },
@@ -32,8 +34,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </div>
             </div>
 
-            <nav className="hidden sm:flex items-center gap-1">
-              {NAV.map((item) => (
+            <div className="flex items-center gap-2 sm:gap-3">
+              <nav className="hidden sm:flex items-center gap-1">
+                {NAV.map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}
@@ -58,7 +61,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   )}
                 </NavLink>
               ))}
-            </nav>
+              </nav>
+              {!appConfig.authDisabled && <AccountMenu />}
+            </div>
           </div>
         </header>
       )}
