@@ -1,11 +1,15 @@
 # ---------------------------------------------------------------------------
 # Burien Station Plant Library — multistage Azure DevOps pipeline
 #
-#   Stage 1  BuildBackend         build backend image -> artifact
-#   Stage 2  BuildFrontend        build frontend image -> artifact
-#   Stage 3  DeployInfrastructure bicep via Azure CLI (runs in parallel)
-#   Stage 4  DeployBackend        needs (1, 3): push image + update app
-#   Stage 5  DeployFrontend       needs (2, 3): push image + update app
+#   Stage 1  DeployInfrastructure bicep via Azure CLI (creates ACR, apps, etc.)
+#   Stage 2  BuildBackend         docker build on agent -> push to ACR (needs 1)
+#   Stage 3  BuildFrontend        docker build on agent -> push to ACR (needs 1)
+#   Stage 4  DeployBackend        update app image (needs 1, 2)
+#   Stage 5  DeployFrontend       update app image (needs 1, 3)
+#   Stage 6  CustomDomains        Cloudflare DNS + managed certs (optional)
+#
+# Images are built on the agent with docker and pushed to ACR; the deploy
+# stages then roll the pushed image onto the Container Apps.
 #
 # Prerequisites:
 #   * An ARM service connection named by `azureServiceConnection` below.
@@ -43,48 +47,8 @@ variables:
 
 stages:
   # -------------------------------------------------------------------------
-  - stage: BuildBackend
-    displayName: '1 · Build backend'
-    dependsOn: []
-    jobs:
-      - job: build
-        pool:
-          vmImage: $(vmImage)
-        steps:
-          - checkout: self
-          - script: |
-              set -euo pipefail
-              docker build -t $(backendImageName):$(imageTag) ./backend
-              mkdir -p "$(Build.ArtifactStagingDirectory)"
-              docker save $(backendImageName):$(imageTag) \
-                -o "$(Build.ArtifactStagingDirectory)/backend-image.tar"
-            displayName: 'Build and save backend image'
-          - publish: '$(Build.ArtifactStagingDirectory)/backend-image.tar'
-            artifact: backend-image
-
-  # -------------------------------------------------------------------------
-  - stage: BuildFrontend
-    displayName: '2 · Build frontend'
-    dependsOn: []
-    jobs:
-      - job: build
-        pool:
-          vmImage: $(vmImage)
-        steps:
-          - checkout: self
-          - script: |
-              set -euo pipefail
-              docker build -t $(frontendImageName):$(imageTag) ./frontend
-              mkdir -p "$(Build.ArtifactStagingDirectory)"
-              docker save $(frontendImageName):$(imageTag) \
-                -o "$(Build.ArtifactStagingDirectory)/frontend-image.tar"
-            displayName: 'Build and save frontend image'
-          - publish: '$(Build.ArtifactStagingDirectory)/frontend-image.tar'
-            artifact: frontend-image
-
-  # -------------------------------------------------------------------------
   - stage: DeployInfrastructure
-    displayName: '3 · Deploy infrastructure'
+    displayName: '1 · Deploy infrastructure'
     dependsOn: []
     jobs:
       - job: infra
@@ -142,6 +106,58 @@ stages:
               ENTRA_CLIENT_SECRET: $(ENTRA_CLIENT_SECRET)
 
   # -------------------------------------------------------------------------
+  - stage: BuildBackend
+    displayName: '2 · Build backend'
+    dependsOn:
+      - DeployInfrastructure
+    variables:
+      acrName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrName'] ]
+      acrLoginServer: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrLoginServer'] ]
+    jobs:
+      - job: build
+        pool:
+          vmImage: $(vmImage)
+        steps:
+          - checkout: self
+          - task: AzureCLI@2
+            displayName: 'Build backend image and push to ACR'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az acr login --name "$(acrName)"
+                docker build -t "$(acrLoginServer)/$(backendImageName):$(imageTag)" ./backend
+                docker push "$(acrLoginServer)/$(backendImageName):$(imageTag)"
+
+  # -------------------------------------------------------------------------
+  - stage: BuildFrontend
+    displayName: '3 · Build frontend'
+    dependsOn:
+      - DeployInfrastructure
+    variables:
+      acrName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrName'] ]
+      acrLoginServer: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrLoginServer'] ]
+    jobs:
+      - job: build
+        pool:
+          vmImage: $(vmImage)
+        steps:
+          - checkout: self
+          - task: AzureCLI@2
+            displayName: 'Build frontend image and push to ACR'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az acr login --name "$(acrName)"
+                docker build -t "$(acrLoginServer)/$(frontendImageName):$(imageTag)" ./frontend
+                docker push "$(acrLoginServer)/$(frontendImageName):$(imageTag)"
+
+  # -------------------------------------------------------------------------
   - stage: DeployBackend
     displayName: '4 · Deploy backend'
     dependsOn:
@@ -149,7 +165,6 @@ stages:
       - DeployInfrastructure
     variables:
       rgName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.rgName'] ]
-      acrName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrName'] ]
       acrLoginServer: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrLoginServer'] ]
       backendAppName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.backendAppName'] ]
     jobs:
@@ -157,21 +172,14 @@ stages:
         pool:
           vmImage: $(vmImage)
         steps:
-          - download: current
-            artifact: backend-image
           - task: AzureCLI@2
-            displayName: 'Push image and update backend app'
+            displayName: 'Update backend app image'
             inputs:
               azureSubscription: $(azureServiceConnection)
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
                 set -euo pipefail
-                docker load -i "$(Pipeline.Workspace)/backend-image/backend-image.tar"
-                az acr login --name "$(acrName)"
-                docker tag $(backendImageName):$(imageTag) \
-                  "$(acrLoginServer)/$(backendImageName):$(imageTag)"
-                docker push "$(acrLoginServer)/$(backendImageName):$(imageTag)"
                 az containerapp update \
                   --name "$(backendAppName)" \
                   --resource-group "$(rgName)" \
@@ -187,7 +195,6 @@ stages:
       - DeployInfrastructure
     variables:
       rgName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.rgName'] ]
-      acrName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrName'] ]
       acrLoginServer: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.acrLoginServer'] ]
       frontendAppName: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.frontendAppName'] ]
       backendFqdn: $[ stageDependencies.DeployInfrastructure.infra.outputs['deployInfra.backendFqdn'] ]
@@ -196,21 +203,14 @@ stages:
         pool:
           vmImage: $(vmImage)
         steps:
-          - download: current
-            artifact: frontend-image
           - task: AzureCLI@2
-            displayName: 'Push image and update frontend app'
+            displayName: 'Update frontend app image'
             inputs:
               azureSubscription: $(azureServiceConnection)
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
                 set -euo pipefail
-                docker load -i "$(Pipeline.Workspace)/frontend-image/frontend-image.tar"
-                az acr login --name "$(acrName)"
-                docker tag $(frontendImageName):$(imageTag) \
-                  "$(acrLoginServer)/$(frontendImageName):$(imageTag)"
-                docker push "$(acrLoginServer)/$(frontendImageName):$(imageTag)"
                 # Point nginx at the backend's public FQDN and roll out the image.
                 az containerapp update \
                   --name "$(frontendAppName)" \
