@@ -42,7 +42,7 @@
     "entraApiAudience": "api://f4860ff8-eecf-41f3-bfad-7aff8b83c0b3/access_as_user"
   },
   "customDomains": {
-    "enabled": false,
+    "enabled": true,
     "apps": [
       {
         "app": "frontend",
