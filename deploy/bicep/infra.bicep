@@ -47,6 +47,9 @@ param acrName string
 @description('Resource group that contains the central ACR. Defaults to this resource group.')
 param acrResourceGroup string = resourceGroup().name
 
+@description('Subscription id that contains the central ACR. Defaults to the current subscription.')
+param acrSubscriptionId string = subscription().subscriptionId
+
 @description('Grant the app managed identity AcrPull on the central ACR. Disable if registry access is managed centrally.')
 param assignAcrPull bool = true
 
@@ -73,7 +76,7 @@ var keyVaultSecretsUserRoleId = subscriptionResourceId(
 // ---------------------------------------------------------------------------
 resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
   name: acrName
-  scope: resourceGroup(acrResourceGroup)
+  scope: resourceGroup(acrSubscriptionId, acrResourceGroup)
 }
 
 // ---------------------------------------------------------------------------
@@ -281,7 +284,7 @@ resource secretEntra 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty
 // ---------------------------------------------------------------------------
 module acrPull 'modules/acrPull.bicep' = if (assignAcrPull) {
   name: 'uamiAcrPull'
-  scope: resourceGroup(acrResourceGroup)
+  scope: resourceGroup(acrSubscriptionId, acrResourceGroup)
   params: {
     acrName: acrName
     principalId: uami.properties.principalId

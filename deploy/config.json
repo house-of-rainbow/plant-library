@@ -17,8 +17,9 @@
     "blobContainerName": "plant-images"
   },
   "acr": {
-    "name": "REPLACE_WITH_CENTRAL_ACR_NAME",
-    "resourceGroup": "REPLACE_WITH_CENTRAL_ACR_RESOURCE_GROUP"
+    "name": "fbreg",
+    "resourceGroup": "shared-services",
+    "subscriptionId": "2b97ce88-afec-492a-9b86-569867ec302f"
   },
   "backend": {
     "cpu": "2",

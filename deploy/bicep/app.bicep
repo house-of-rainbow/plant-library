@@ -28,6 +28,9 @@ param tags object = {}
 param acrName string
 param acrResourceGroup string = resourceGroup().name
 
+@description('Subscription id that contains the central ACR. Defaults to the current subscription.')
+param acrSubscriptionId string = subscription().subscriptionId
+
 // Cosmos / Storage config (must match infra.bicep)
 param cosmosDatabaseName string
 param classesContainer string
@@ -98,7 +101,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
 
 resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
   name: acrName
-  scope: resourceGroup(acrResourceGroup)
+  scope: resourceGroup(acrSubscriptionId, acrResourceGroup)
 }
 
 // ---------------------------------------------------------------------------

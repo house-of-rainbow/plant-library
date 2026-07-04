@@ -19,6 +19,7 @@ param blobContainerName = config.storage.blobContainerName
 
 param acrName = config.acr.name
 param acrResourceGroup = config.acr.resourceGroup
+param acrSubscriptionId = config.acr.subscriptionId
 
 // Injected by the pipeline (secure). Empty locally.
 param entraClientSecret = readEnvironmentVariable('ENTRA_CLIENT_SECRET', '')

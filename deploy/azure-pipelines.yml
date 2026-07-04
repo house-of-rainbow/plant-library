@@ -124,8 +124,9 @@ stages:
               inlineScript: |
                 set -euo pipefail
                 ACR_NAME=$(jq -r '.acr.name' deploy/config.json)
+                ACR_SUB=$(jq -r '.acr.subscriptionId' deploy/config.json)
                 ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
-                az acr login --name "$ACR_NAME"
+                az acr login --name "$ACR_NAME" --subscription "$ACR_SUB"
                 docker build -t "${ACR_LOGIN_SERVER}/$(backendImageName):$(imageTag)" ./backend
                 docker push "${ACR_LOGIN_SERVER}/$(backendImageName):$(imageTag)"
 
@@ -148,8 +149,9 @@ stages:
               inlineScript: |
                 set -euo pipefail
                 ACR_NAME=$(jq -r '.acr.name' deploy/config.json)
+                ACR_SUB=$(jq -r '.acr.subscriptionId' deploy/config.json)
                 ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
-                az acr login --name "$ACR_NAME"
+                az acr login --name "$ACR_NAME" --subscription "$ACR_SUB"
                 docker build -t "${ACR_LOGIN_SERVER}/$(frontendImageName):$(imageTag)" ./frontend
                 docker push "${ACR_LOGIN_SERVER}/$(frontendImageName):$(imageTag)"
 

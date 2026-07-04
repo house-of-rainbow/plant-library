@@ -12,6 +12,7 @@ param tags = config.tags
 
 param acrName = config.acr.name
 param acrResourceGroup = config.acr.resourceGroup
+param acrSubscriptionId = config.acr.subscriptionId
 
 param cosmosDatabaseName = config.cosmos.databaseName
 param classesContainer = config.cosmos.classesContainer
