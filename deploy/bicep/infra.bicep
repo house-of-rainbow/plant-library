@@ -40,6 +40,10 @@ param blobContainerName string
 @secure()
 param entraClientSecret string = ''
 
+@description('Optional Pl@ntNet API key (injected from a pipeline secret). Stored in Key Vault when provided.')
+@secure()
+param plantnetApiKey string = ''
+
 // Central container registry (pre-existing; not deployed by this template).
 @description('Name of the existing central Azure Container Registry.')
 param acrName string
@@ -274,6 +278,14 @@ resource secretEntra 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty
   name: 'entra-client-secret'
   properties: {
     value: entraClientSecret
+  }
+}
+
+resource secretPlantnet 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(plantnetApiKey)) {
+  parent: keyVault
+  name: 'plantnet-api-key'
+  properties: {
+    value: plantnetApiKey
   }
 }
 

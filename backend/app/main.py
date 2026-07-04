@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db import get_db
-from .routers import classes, dashboard, images, instances, scan
+from .routers import classes, dashboard, identify, images, instances, scan
 from .storage import get_storage
 
 settings = get_settings()
@@ -44,6 +44,7 @@ app.include_router(instances.router)
 app.include_router(scan.router)
 app.include_router(images.router)
 app.include_router(dashboard.router)
+app.include_router(identify.router)
 
 
 @app.get("/api/health", tags=["health"])

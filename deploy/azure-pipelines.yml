@@ -104,6 +104,7 @@ stages:
                 set_out managedEnvironmentName managedEnvironmentName
             env:
               ENTRA_CLIENT_SECRET: $(ENTRA_CLIENT_SECRET)
+              PLANT_DOT_NET__API_KEY: $(PLANT_DOT_NET__API_KEY)
 
   # -------------------------------------------------------------------------
   - stage: BuildBackend
@@ -190,6 +191,7 @@ stages:
               BACKEND_IMAGE: '$(acrLoginServer)/$(backendImageName):$(imageTag)'
               FRONTEND_IMAGE: '$(acrLoginServer)/$(frontendImageName):$(imageTag)'
               ENTRA_CLIENT_SECRET: $(ENTRA_CLIENT_SECRET)
+              PLANT_DOT_NET__API_KEY: $(PLANT_DOT_NET__API_KEY)
 
   # -------------------------------------------------------------------------
   # 6 · Custom domains + Cloudflare DNS + Azure managed (ACME) certificates.

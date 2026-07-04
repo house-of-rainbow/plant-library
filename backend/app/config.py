@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +42,10 @@ class Settings(BaseSettings):
 
     # Scan / labels
     scan_base_url: str = "http://localhost:5173/scan"
+
+    # Pl@ntNet identification API (https://my.plantnet.org/)
+    plantnet_api_key: str = Field(default="", validation_alias="PLANT_DOT_NET__API_KEY")
+    plantnet_base_url: str = "https://my-api.plantnet.org"
 
     @property
     def cors_origins_list(self) -> list[str]:

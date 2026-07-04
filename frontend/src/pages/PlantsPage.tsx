@@ -5,6 +5,7 @@ import { classesApi, imagesApi, instancesApi, type InstanceCreate } from "../api
 import type { HealthStatus } from "../types";
 import { HEALTH_META } from "../lib/format";
 import PlantCard from "../components/PlantCard";
+import IdentifyModal from "../components/IdentifyModal";
 
 const HEALTH_OPTIONS: HealthStatus[] = [
   "thriving",
@@ -17,6 +18,7 @@ const HEALTH_OPTIONS: HealthStatus[] = [
 export default function PlantsPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [identifyOpen, setIdentifyOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [uploading, setUploading] = useState(false);
 
@@ -82,6 +84,12 @@ export default function PlantsPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
           <button
+            className="btn-ghost whitespace-nowrap"
+            onClick={() => setIdentifyOpen(true)}
+          >
+            📷 Identify first
+          </button>
+          <button
             className="btn-primary whitespace-nowrap"
             onClick={() => setOpen(true)}
             disabled={!classes.length}
@@ -94,7 +102,8 @@ export default function PlantsPage() {
 
       {!classes.length && (
         <div className="glass p-6 text-center text-white/60">
-          Add a species in the <strong>Species</strong> tab before creating plants.
+          Add a species in the <strong>Species</strong> tab before creating plants,
+          or tap <strong>Identify first</strong> to snap a photo and add one automatically.
         </div>
       )}
 
@@ -213,6 +222,23 @@ export default function PlantsPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <IdentifyModal
+        classes={classes}
+        open={identifyOpen}
+        onClose={() => setIdentifyOpen(false)}
+        onUse={({ classId, imageUrls }) => {
+          setForm({
+            class_id: classId,
+            nickname: "",
+            location: "",
+            health_status: "healthy",
+            image_urls: imageUrls,
+          });
+          setIdentifyOpen(false);
+          setOpen(true);
+        }}
+      />
     </div>
   );
 }

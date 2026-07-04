@@ -49,6 +49,9 @@ param entraApiScope string = ''
 @description('Whether an entra-client-secret exists in Key Vault (set by the pipeline).')
 param hasEntraSecret bool = false
 
+@description('Whether a plantnet-api-key exists in Key Vault (set by the pipeline).')
+param hasPlantnetKey bool = false
+
 // Images (set by the release pipeline; default placeholder for a dry run)
 param backendImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
 param frontendImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
@@ -137,6 +140,15 @@ var backendSecrets = concat(
           identity: uami.id
         }
       ]
+    : [],
+  hasPlantnetKey
+    ? [
+        {
+          name: 'plantnet-api-key'
+          keyVaultUrl: '${kvUri}secrets/plantnet-api-key'
+          identity: uami.id
+        }
+      ]
     : []
 )
 
@@ -160,11 +172,19 @@ var backendBaseEnv = [
   { name: 'SCAN_BASE_URL', value: 'https://${frontendFqdn}/scan' }
 ]
 
-var backendEnv = hasEntraSecret
-  ? concat(backendBaseEnv, [
-      { name: 'ENTRA_CLIENT_SECRET', secretRef: 'entra-client-secret' }
-    ])
-  : backendBaseEnv
+var backendEnv = concat(
+  backendBaseEnv,
+  hasEntraSecret
+    ? [
+        { name: 'ENTRA_CLIENT_SECRET', secretRef: 'entra-client-secret' }
+      ]
+    : [],
+  hasPlantnetKey
+    ? [
+        { name: 'PLANT_DOT_NET__API_KEY', secretRef: 'plantnet-api-key' }
+      ]
+    : []
+)
 
 // ---------------------------------------------------------------------------
 // Container apps

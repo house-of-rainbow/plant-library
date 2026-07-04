@@ -103,4 +103,35 @@ export const dashboardApi = {
     http.get<DashboardSummary>("/api/dashboard/summary").then((r) => r.data),
 };
 
+// ---- Identify (Pl@ntNet) ----
+export interface IdentifyCandidate {
+  scientific_name: string;
+  scientific_name_without_author?: string | null;
+  common_name?: string | null;
+  common_names: string[];
+  genus?: string | null;
+  family?: string | null;
+  score: number;
+  gbif_id?: string | null;
+  powo_id?: string | null;
+  image_url?: string | null;
+}
+
+export interface IdentifyResponse {
+  best_match?: string | null;
+  remaining_requests?: number | null;
+  candidates: IdentifyCandidate[];
+}
+
+export const identifyApi = {
+  identify: async (files: File[]): Promise<IdentifyResponse> => {
+    const form = new FormData();
+    files.forEach((f) => form.append("images", f));
+    const { data } = await http.post<IdentifyResponse>("/api/identify", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return data;
+  },
+};
+
 export type { CareEvent };
