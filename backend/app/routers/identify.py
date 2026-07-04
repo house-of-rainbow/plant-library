@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..auth import CurrentUser, get_current_user
+from ..aspca import lookup_pet_toxicity
 from ..config import Settings, get_settings
 from ..openai_identify import consolidate_with_openai, identify_with_openai
 
@@ -41,6 +42,7 @@ class IdentifyCandidate(BaseModel):
     image_url: Optional[str] = None
     agreed_by_both: Optional[bool] = None
     note: Optional[str] = None
+    pet_toxicity: Optional[dict] = None
 
 
 class IdentifyResponse(BaseModel):
@@ -372,6 +374,33 @@ async def identify_stream(
                     continue
                 seen.add(key)
                 final.append(c)
+
+        # Pet-toxicity lookup (ASPCA) for the top candidate.
+        if final and settings.aspca_enabled:
+            yield line({"step": "toxicity", "status": "running"})
+            try:
+                top = final[0]
+                names = list(top.common_names) or (
+                    [top.common_name] if top.common_name else []
+                )
+                tox = await lookup_pet_toxicity(
+                    top.scientific_name_without_author or top.scientific_name,
+                    names,
+                )
+                top.pet_toxicity = tox.model_dump()
+                yield line(
+                    {
+                        "step": "toxicity",
+                        "status": "done",
+                        "label_level": tox.label_level,
+                        "matched": tox.matched,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Toxicity lookup failed: %s", exc)
+                yield line({"step": "toxicity", "status": "error"})
+        else:
+            yield line({"step": "toxicity", "status": "skipped"})
 
         yield line(
             {

@@ -115,6 +115,22 @@ export const dashboardApi = {
 };
 
 // ---- Identify (Pl@ntNet) ----
+export interface PetToxicity {
+  matched: boolean;
+  source_url?: string | null;
+  matched_scientific_name?: string | null;
+  matched_common_name?: string | null;
+  dogs: "toxic" | "non_toxic" | "unknown";
+  cats: "toxic" | "non_toxic" | "unknown";
+  horses: "toxic" | "non_toxic" | "unknown";
+  toxic_principles?: string | null;
+  clinical_signs?: string | null;
+  severity?: string;
+  label_level: "safe" | "caution" | "toxic" | "danger" | "unknown";
+  toxic_to_pets?: boolean | null;
+  summary?: string;
+}
+
 export interface IdentifyCandidate {
   scientific_name: string;
   scientific_name_without_author?: string | null;
@@ -128,6 +144,7 @@ export interface IdentifyCandidate {
   image_url?: string | null;
   agreed_by_both?: boolean | null;
   note?: string | null;
+  pet_toxicity?: PetToxicity | null;
 }
 
 export interface IdentifyResponse {
@@ -137,7 +154,7 @@ export interface IdentifyResponse {
   candidates: IdentifyCandidate[];
 }
 
-export type IdentifyStep = "start" | "plantnet" | "openai" | "consolidate" | "complete";
+export type IdentifyStep = "start" | "plantnet" | "openai" | "consolidate" | "toxicity" | "complete";
 export type IdentifyStepStatus = "running" | "done" | "error" | "skipped";
 
 export interface IdentifyStreamEvent {

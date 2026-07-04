@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     openai_model: str = "gpt-4o"
 
+    # ASPCA pet-toxicity lookup (best-effort enrichment after identification)
+    aspca_enabled: bool = True
+
     # MCP server API keys (comma-separated GUIDs; any listed key is valid)
     mcp_api_keys: str = ""
 

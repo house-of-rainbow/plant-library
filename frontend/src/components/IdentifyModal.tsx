@@ -12,11 +12,12 @@ import type { PlantClass } from "../types";
 
 const MAX_PHOTOS = 5;
 
-type StepKey = "plantnet" | "openai" | "consolidate";
+type StepKey = "plantnet" | "openai" | "consolidate" | "toxicity";
 const STEPS: { key: StepKey; label: string }[] = [
   { key: "plantnet", label: "Pl@ntNet" },
   { key: "openai", label: "GPT vision" },
   { key: "consolidate", label: "Consolidating" },
+  { key: "toxicity", label: "Pet toxicity (ASPCA)" },
 ];
 
 type StepState = Record<StepKey, { status?: IdentifyStepStatus; count?: number }>;
@@ -31,6 +32,14 @@ function confidenceColor(score: number): string {
 function normalize(s?: string | null): string {
   return (s ?? "").trim().toLowerCase();
 }
+
+const TOX_BADGE: Record<string, { text: string; cls: string }> = {
+  danger: { text: "☠️ Severe pet risk", cls: "bg-red-500/25 text-red-200" },
+  toxic: { text: "⚠️ Toxic to pets", cls: "bg-amber-500/20 text-amber-200" },
+  caution: { text: "⚠️ Use caution", cls: "bg-amber-500/20 text-amber-200" },
+  safe: { text: "✅ Pet-safe (ASPCA)", cls: "bg-canopy-500/20 text-canopy-200" },
+  unknown: { text: "❓ Toxicity unknown", cls: "bg-white/10 text-white/50" },
+};
 
 function EngineList({
   title,
@@ -206,6 +215,7 @@ export default function IdentifyModal({
       plantnet: { status: "running" },
       openai: { status: "running" },
       consolidate: {},
+      toxicity: {},
     } as StepState);
     setEngineResults({ plantnet: [], openai: [] });
     setShowDetails(false);
@@ -214,7 +224,12 @@ export default function IdentifyModal({
         if (e.step === "complete") {
           setCandidates(e.candidates ?? []);
           setSummary(e.summary ?? null);
-        } else if (e.step === "plantnet" || e.step === "openai" || e.step === "consolidate") {
+        } else if (
+          e.step === "plantnet" ||
+          e.step === "openai" ||
+          e.step === "consolidate" ||
+          e.step === "toxicity"
+        ) {
           const key = e.step as StepKey;
           setSteps((prev) => ({ ...prev, [key]: { status: e.status, count: e.count } }));
           if ((e.step === "plantnet" || e.step === "openai") && e.candidates) {
@@ -243,6 +258,17 @@ export default function IdentifyModal({
       const imageUrls = await Promise.all(files.map((f) => imagesApi.upload(f)));
       let cls = matchClass(candidate);
       if (!cls) {
+        const tox = candidate.pet_toxicity;
+        const careNotes = tox && tox.matched
+          ? [
+              tox.summary,
+              tox.toxic_principles ? `Toxic principles: ${tox.toxic_principles}` : "",
+              tox.clinical_signs ? `Clinical signs: ${tox.clinical_signs}` : "",
+              tox.source_url ? `Source: ${tox.source_url}` : "",
+            ]
+              .filter(Boolean)
+              .join("\n")
+          : undefined;
         cls = await classesApi.create({
           common_name:
             candidate.common_name ||
@@ -253,7 +279,10 @@ export default function IdentifyModal({
           family: candidate.family || undefined,
           genus: candidate.genus || undefined,
           hero_image_url: candidate.image_url || undefined,
-          care_defaults: {},
+          care_defaults: {
+            toxic_to_pets: tox?.toxic_to_pets ?? undefined,
+            care_notes: careNotes,
+          },
         } as Partial<PlantClass>);
         qc.invalidateQueries({ queryKey: ["classes"] });
       }
@@ -395,6 +424,16 @@ export default function IdentifyModal({
                           {c.scientific_name_without_author || c.scientific_name}
                           {c.family ? ` · ${c.family}` : ""}
                         </div>
+                        {c.pet_toxicity && (
+                          <div
+                            className={`pill mt-1 text-[10px] py-0 ${
+                              (TOX_BADGE[c.pet_toxicity.label_level] ?? TOX_BADGE.unknown).cls
+                            }`}
+                            title={c.pet_toxicity.summary || ""}
+                          >
+                            {(TOX_BADGE[c.pet_toxicity.label_level] ?? TOX_BADGE.unknown).text}
+                          </div>
+                        )}
                         <div className="mt-1 flex items-center gap-2">
                           <div className="h-1.5 flex-1 rounded-full bg-white/10 overflow-hidden">
                             <div
