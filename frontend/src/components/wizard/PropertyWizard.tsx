@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { propertiesApi } from "../../api";
+import { useSceneEffectsEnabled } from "../../lib/effects";
 import type { Property } from "../../types";
 import WizardScene from "../../three/WizardScene";
 
@@ -15,6 +16,7 @@ interface Props {
 type StepId = "welcome" | "property" | "garden" | "finish";
 
 export default function PropertyWizard({ isFirst, onClose, onCreated }: Props) {
+  const effectsEnabled = useSceneEffectsEnabled();
   const steps: StepId[] = useMemo(
     () => (isFirst ? ["welcome", "property", "garden", "finish"] : ["welcome", "property", "finish"]),
     [isFirst]
@@ -59,10 +61,14 @@ export default function PropertyWizard({ isFirst, onClose, onCreated }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-[#04120b]">
-      {/* Immersive three.js background */}
-      <div className="absolute inset-0">
-        <WizardScene progress={0.15 + progress * 0.85} />
-      </div>
+      {/* Immersive background on desktop; static fallback on real mobile. */}
+      {effectsEnabled ? (
+        <div className="absolute inset-0">
+          <WizardScene progress={0.15 + progress * 0.85} />
+        </div>
+      ) : (
+        <div className="absolute inset-0 bg-[radial-gradient(1200px_700px_at_20%_-10%,rgba(32,161,94,0.22),transparent_60%),radial-gradient(900px_600px_at_100%_0%,rgba(236,72,153,0.12),transparent_55%),linear-gradient(180deg,#062014_0%,#04120b_100%)]" />
+      )}
       <div className="absolute inset-0 bg-gradient-to-t from-[#04120b] via-transparent to-[#04120b]/40 pointer-events-none" />
 
       {/* Progress dots */}

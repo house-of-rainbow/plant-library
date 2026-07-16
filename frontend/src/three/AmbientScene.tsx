@@ -1,6 +1,7 @@
 import { useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+import { useSceneEffectsEnabled } from "../lib/effects";
 
 /**
  * Ambient floating-spores background scene. Rendered fixed behind the app for
@@ -57,6 +58,12 @@ function Spores({ count = 600 }: { count?: number }) {
 }
 
 export default function AmbientScene() {
+  const effectsEnabled = useSceneEffectsEnabled();
+
+  if (!effectsEnabled) {
+    return null;
+  }
+
   return (
     <div className="fixed inset-0 -z-10 pointer-events-none">
       <Canvas camera={{ position: [0, 0, 10], fov: 60 }} dpr={[1, 1.5]}>
