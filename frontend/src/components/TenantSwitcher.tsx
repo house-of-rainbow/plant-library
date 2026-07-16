@@ -22,22 +22,17 @@ export default function TenantSwitcher() {
   const [gardenName, setGardenName] = useState("");
   const [gardenError, setGardenError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, []);
-
-  if (!property) return null;
+  const propertyId = property?.id ?? null;
 
   const createGarden = useMutation({
-    mutationFn: () =>
-      gardensApi.create(property.id, {
+    mutationFn: () => {
+      if (!propertyId) {
+        throw new Error("No active property selected");
+      }
+      return gardensApi.create(propertyId, {
         name: gardenName.trim(),
-      }),
+      });
+    },
     onSuccess: async (created) => {
       await refresh();
       setGardenId(created.id);
@@ -53,6 +48,16 @@ export default function TenantSwitcher() {
       setGardenError(detail);
     },
   });
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  if (!property) return null;
 
   return (
     <div className="relative" ref={ref}>
