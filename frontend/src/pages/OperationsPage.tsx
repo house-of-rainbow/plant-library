@@ -7,6 +7,7 @@ import type { PlantInstance } from "../types";
 import { HEALTH_META, relativeDays } from "../lib/format";
 import QrScanner from "../components/QrScanner";
 import IdentifyModal from "../components/IdentifyModal";
+import { useTenant } from "../tenant/TenantContext";
 
 function CareRow({ plant }: { plant: PlantInstance }) {
   const qc = useQueryClient();
@@ -15,7 +16,8 @@ function CareRow({ plant }: { plant: PlantInstance }) {
   const overdue = plant.care_status.watering_overdue;
 
   const water = useMutation({
-    mutationFn: () => instancesApi.addEvent(plant.id, { type: "watered" }),
+    mutationFn: () =>
+      instancesApi.addEvent(plant.property_id, plant.id, { type: "watered" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ops-summary"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
@@ -66,13 +68,27 @@ export default function OperationsPage() {
   const [identifyOpen, setIdentifyOpen] = useState(false);
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ["ops-summary"], queryFn: dashboardApi.summary });
-  const { data: classes = [] } = useQuery({ queryKey: ["classes"], queryFn: classesApi.list });
+  const { propertyId, gardenId } = useTenant();
+  const { data } = useQuery({
+    queryKey: ["ops-summary", propertyId, gardenId],
+    queryFn: () => dashboardApi.summary(propertyId!, gardenId ?? undefined),
+    enabled: !!propertyId,
+  });
+  const { data: classes = [] } = useQuery({
+    queryKey: ["classes", propertyId],
+    queryFn: () => classesApi.list(propertyId!),
+    enabled: !!propertyId,
+  });
 
   // Snap → identify → create the plant → jump to its detail to fill in the rest.
   const quickAdd = useMutation({
     mutationFn: ({ classId, imageUrls }: { classId: string; imageUrls: string[] }) =>
-      instancesApi.create({ class_id: classId, health_status: "healthy", image_urls: imageUrls }),
+      instancesApi.create(propertyId!, {
+        class_id: classId,
+        garden_id: gardenId!,
+        health_status: "healthy",
+        image_urls: imageUrls,
+      }),
     onSuccess: (plant) => {
       qc.invalidateQueries({ queryKey: ["instances"] });
       qc.invalidateQueries({ queryKey: ["ops-summary"] });
@@ -131,6 +147,7 @@ export default function OperationsPage() {
       {scanning && <QrScanner onClose={() => setScanning(false)} />}
       <IdentifyModal
         classes={classes}
+        propertyId={propertyId!}
         open={identifyOpen}
         onClose={() => setIdentifyOpen(false)}
         onUse={(r) => quickAdd.mutate(r)}

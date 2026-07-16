@@ -17,6 +17,7 @@ param acrSubscriptionId = config.acr.subscriptionId
 param cosmosDatabaseName = config.cosmos.databaseName
 param classesContainer = config.cosmos.classesContainer
 param instancesContainer = config.cosmos.instancesContainer
+param tenancyContainer = config.cosmos.tenancyContainer
 param blobContainerName = config.storage.blobContainerName
 
 param authDisabled = config.auth.authDisabled

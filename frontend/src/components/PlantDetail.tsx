@@ -33,7 +33,8 @@ export default function PlantDetail({
   const title = plant.nickname || plant.plant_class?.common_name || "Plant";
 
   const logEvent = useMutation({
-    mutationFn: (type: EventType) => instancesApi.addEvent(plant.id, { type }),
+    mutationFn: (type: EventType) =>
+      instancesApi.addEvent(plant.property_id, plant.id, { type }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["instance", plant.id] });
       qc.invalidateQueries({ queryKey: ["scan", plant.id] });

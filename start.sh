@@ -42,3 +42,7 @@ echo "==> Done."
 echo "    Frontend : http://localhost:5173"
 echo "    Backend  : http://localhost:8000/docs"
 echo "    Azurite  : http://localhost:10000"
+echo
+echo "    A fresh database has no properties yet — the app opens the"
+echo "    onboarding wizard to create your first Property + Home garden."
+echo "    To load demo data instead, run:  python backend/seed.py"

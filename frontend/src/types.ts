@@ -54,6 +54,7 @@ export interface CareDefaults {
 
 export interface PlantClass {
   id: string;
+  property_id: string;
   common_name: string;
   scientific_name?: string | null;
   family?: string | null;
@@ -87,7 +88,9 @@ export interface CareStatus {
 
 export interface PlantInstance {
   id: string;
+  property_id: string;
   class_id: string;
+  garden_id: string;
   nickname?: string | null;
   location?: string | null;
   acquisition_date?: string | null;
@@ -96,6 +99,7 @@ export interface PlantInstance {
   health_status: HealthStatus;
   care_overrides: CareDefaults;
   image_urls: string[];
+  tag_ids: string[];
   notes?: string | null;
   last_watered_at?: string | null;
   last_fertilized_at?: string | null;
@@ -117,4 +121,56 @@ export interface DashboardSummary {
   watering_overdue: PlantInstance[];
   watering_due_soon: PlantInstance[];
   needs_attention: PlantInstance[];
+}
+
+// ---- Multitenancy: Property -> Garden -> Plant ----
+
+export type MemberRole = "owner" | "member";
+
+export type TagScope = "property" | "garden" | null;
+
+export interface Garden {
+  id: string;
+  property_id: string;
+  name: string;
+  description?: string | null;
+  is_home: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Property {
+  id: string;
+  property_id: string;
+  name: string;
+  address?: string | null;
+  owner_oid: string;
+  owner_email?: string | null;
+  role: MemberRole;
+  gardens: Garden[];
+  member_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Membership {
+  id: string;
+  property_id: string;
+  user_oid?: string | null;
+  user_email: string;
+  user_name?: string | null;
+  role: MemberRole;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Tag {
+  id: string;
+  property_id: string;
+  name: string;
+  color?: string | null;
+  scope?: TagScope;
+  garden_id?: string | null;
+  created_at: string;
+  updated_at: string;
 }

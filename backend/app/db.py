@@ -24,6 +24,7 @@ class Database:
         self._client: Optional[AsyncCosmosClient] = None
         self.classes = None
         self.instances = None
+        self.tenancy = None
 
     async def connect(self, settings: Settings | None = None) -> None:
         settings = settings or get_settings()
@@ -38,13 +39,19 @@ class Database:
         db = await self._client.create_database_if_not_exists(
             id=settings.cosmos_database
         )
+        # Every container is partitioned by /property_id so a whole tenant maps
+        # to a single logical partition.
         self.classes = await db.create_container_if_not_exists(
             id=settings.cosmos_classes_container,
-            partition_key=PartitionKey(path="/pk"),
+            partition_key=PartitionKey(path="/property_id"),
         )
         self.instances = await db.create_container_if_not_exists(
             id=settings.cosmos_instances_container,
-            partition_key=PartitionKey(path="/pk"),
+            partition_key=PartitionKey(path="/property_id"),
+        )
+        self.tenancy = await db.create_container_if_not_exists(
+            id=settings.cosmos_tenancy_container,
+            partition_key=PartitionKey(path="/property_id"),
         )
         logger.info("Connected to Cosmos DB database '%s'", settings.cosmos_database)
 

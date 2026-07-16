@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { appConfig } from "./config";
 import { setTokenProvider } from "./api";
+import { TenantProvider } from "./tenant/TenantContext";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -14,7 +15,9 @@ const queryClient = new QueryClient({
 function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>{children}</BrowserRouter>
+      <BrowserRouter>
+        <TenantProvider>{children}</TenantProvider>
+      </BrowserRouter>
     </QueryClientProvider>
   );
 }

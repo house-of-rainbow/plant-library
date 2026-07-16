@@ -4,9 +4,15 @@ import type {
   CareEvent,
   DashboardSummary,
   EventType,
+  Garden,
   HealthStatus,
+  MemberRole,
+  Membership,
   PlantClass,
   PlantInstance,
+  Property,
+  Tag,
+  TagScope,
 } from "./types";
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || "";
@@ -41,20 +47,152 @@ export async function authHeaders(): Promise<Record<string, string>> {
 
 export const apiBaseUrl = baseURL;
 
+// ---- Properties / Gardens / Members (tenancy) ----
+export interface PropertyCreate {
+  name: string;
+  address?: string;
+  home_garden_name?: string;
+}
+
+export interface GardenCreate {
+  name: string;
+  description?: string;
+  is_home?: boolean;
+}
+
+export const propertiesApi = {
+  list: () => http.get<Property[]>("/api/properties").then((r) => r.data),
+  get: (id: string) => http.get<Property>(`/api/properties/${id}`).then((r) => r.data),
+  create: (payload: PropertyCreate) =>
+    http.post<Property>("/api/properties", payload).then((r) => r.data),
+  update: (id: string, payload: { name?: string; address?: string }) =>
+    http.patch<Property>(`/api/properties/${id}`, payload).then((r) => r.data),
+  remove: (id: string) => http.delete(`/api/properties/${id}`).then((r) => r.data),
+};
+
+export const gardensApi = {
+  list: (propertyId: string) =>
+    http.get<Garden[]>(`/api/properties/${propertyId}/gardens`).then((r) => r.data),
+  create: (propertyId: string, payload: GardenCreate) =>
+    http
+      .post<Garden>(`/api/properties/${propertyId}/gardens`, payload)
+      .then((r) => r.data),
+  update: (
+    propertyId: string,
+    gardenId: string,
+    payload: { name?: string; description?: string }
+  ) =>
+    http
+      .patch<Garden>(`/api/properties/${propertyId}/gardens/${gardenId}`, payload)
+      .then((r) => r.data),
+  remove: (propertyId: string, gardenId: string) =>
+    http
+      .delete(`/api/properties/${propertyId}/gardens/${gardenId}`)
+      .then((r) => r.data),
+};
+
+export const membersApi = {
+  list: (propertyId: string) =>
+    http
+      .get<Membership[]>(`/api/properties/${propertyId}/members`)
+      .then((r) => r.data),
+  add: (propertyId: string, payload: { email: string; role: MemberRole }) =>
+    http
+      .post<Membership>(`/api/properties/${propertyId}/members`, payload)
+      .then((r) => r.data),
+  updateRole: (propertyId: string, memberId: string, role: MemberRole) =>
+    http
+      .patch<Membership>(
+        `/api/properties/${propertyId}/members/${memberId}`,
+        { role }
+      )
+      .then((r) => r.data),
+  remove: (propertyId: string, memberId: string) =>
+    http
+      .delete(`/api/properties/${propertyId}/members/${memberId}`)
+      .then((r) => r.data),
+};
+
+// ---- Tags ----
+export interface TagCreate {
+  name: string;
+  color?: string | null;
+  scope?: TagScope;
+  garden_id?: string | null;
+}
+
+export const tagsApi = {
+  list: (propertyId: string, params?: { garden_id?: string; scope?: TagScope }) =>
+    http
+      .get<Tag[]>(`/api/properties/${propertyId}/tags`, { params })
+      .then((r) => r.data),
+  create: (propertyId: string, payload: TagCreate) =>
+    http
+      .post<Tag>(`/api/properties/${propertyId}/tags`, payload)
+      .then((r) => r.data),
+  update: (propertyId: string, tagId: string, payload: Partial<TagCreate>) =>
+    http
+      .patch<Tag>(`/api/properties/${propertyId}/tags/${tagId}`, payload)
+      .then((r) => r.data),
+  remove: (propertyId: string, tagId: string) =>
+    http.delete(`/api/properties/${propertyId}/tags/${tagId}`).then((r) => r.data),
+  apply: (propertyId: string, tagId: string, instanceIds: string[]) =>
+    http
+      .post(`/api/properties/${propertyId}/tags/${tagId}/apply`, {
+        instance_ids: instanceIds,
+      })
+      .then((r) => r.data),
+  removeFromPlants: (propertyId: string, tagId: string, instanceIds: string[]) =>
+    http
+      .post(`/api/properties/${propertyId}/tags/${tagId}/remove`, {
+        instance_ids: instanceIds,
+      })
+      .then((r) => r.data),
+  runAction: (
+    propertyId: string,
+    tagId: string,
+    payload: { type: EventType; notes?: string; treatment?: string; new_health_status?: HealthStatus }
+  ) =>
+    http
+      .post<{ affected: number }>(
+        `/api/properties/${propertyId}/tags/${tagId}/action`,
+        payload
+      )
+      .then((r) => r.data),
+};
+
 // ---- Plant classes ----
 export const classesApi = {
-  list: () => http.get<PlantClass[]>("/api/classes").then((r) => r.data),
-  get: (id: string) => http.get<PlantClass>(`/api/classes/${id}`).then((r) => r.data),
-  create: (payload: Partial<PlantClass>) =>
-    http.post<PlantClass>("/api/classes", payload).then((r) => r.data),
-  update: (id: string, payload: Partial<PlantClass>) =>
-    http.patch<PlantClass>(`/api/classes/${id}`, payload).then((r) => r.data),
-  remove: (id: string) => http.delete(`/api/classes/${id}`).then((r) => r.data),
+  list: (propertyId: string) =>
+    http
+      .get<PlantClass[]>("/api/classes", { params: { property_id: propertyId } })
+      .then((r) => r.data),
+  get: (propertyId: string, id: string) =>
+    http
+      .get<PlantClass>(`/api/classes/${id}`, { params: { property_id: propertyId } })
+      .then((r) => r.data),
+  create: (propertyId: string, payload: Partial<PlantClass>) =>
+    http
+      .post<PlantClass>("/api/classes", payload, {
+        params: { property_id: propertyId },
+      })
+      .then((r) => r.data),
+  update: (propertyId: string, id: string, payload: Partial<PlantClass>) =>
+    http
+      .patch<PlantClass>(`/api/classes/${id}`, payload, {
+        params: { property_id: propertyId },
+      })
+      .then((r) => r.data),
+  remove: (propertyId: string, id: string) =>
+    http
+      .delete(`/api/classes/${id}`, { params: { property_id: propertyId } })
+      .then((r) => r.data),
 };
 
 // ---- Plant instances ----
 export interface InstanceCreate {
   class_id: string;
+  garden_id: string;
   nickname?: string;
   location?: string;
   acquisition_date?: string;
@@ -63,29 +201,51 @@ export interface InstanceCreate {
   health_status?: HealthStatus;
   care_overrides?: CareDefaults;
   image_urls?: string[];
+  tag_ids?: string[];
   notes?: string;
 }
 
 export const instancesApi = {
-  list: (classId?: string) =>
+  list: (
+    propertyId: string,
+    filters?: { garden_id?: string; class_id?: string; tag_id?: string }
+  ) =>
     http
       .get<PlantInstance[]>("/api/instances", {
-        params: classId ? { class_id: classId } : undefined,
+        params: { property_id: propertyId, ...filters },
       })
       .then((r) => r.data),
-  get: (id: string) =>
-    http.get<PlantInstance>(`/api/instances/${id}`).then((r) => r.data),
-  create: (payload: InstanceCreate) =>
-    http.post<PlantInstance>("/api/instances", payload).then((r) => r.data),
-  update: (id: string, payload: Partial<InstanceCreate>) =>
-    http.patch<PlantInstance>(`/api/instances/${id}`, payload).then((r) => r.data),
-  remove: (id: string) => http.delete(`/api/instances/${id}`).then((r) => r.data),
+  get: (propertyId: string, id: string) =>
+    http
+      .get<PlantInstance>(`/api/instances/${id}`, {
+        params: { property_id: propertyId },
+      })
+      .then((r) => r.data),
+  create: (propertyId: string, payload: InstanceCreate) =>
+    http
+      .post<PlantInstance>("/api/instances", payload, {
+        params: { property_id: propertyId },
+      })
+      .then((r) => r.data),
+  update: (propertyId: string, id: string, payload: Partial<InstanceCreate>) =>
+    http
+      .patch<PlantInstance>(`/api/instances/${id}`, payload, {
+        params: { property_id: propertyId },
+      })
+      .then((r) => r.data),
+  remove: (propertyId: string, id: string) =>
+    http
+      .delete(`/api/instances/${id}`, { params: { property_id: propertyId } })
+      .then((r) => r.data),
   addEvent: (
+    propertyId: string,
     id: string,
     payload: { type: EventType; notes?: string; treatment?: string; new_health_status?: HealthStatus }
   ) =>
     http
-      .post<PlantInstance>(`/api/instances/${id}/events`, payload)
+      .post<PlantInstance>(`/api/instances/${id}/events`, payload, {
+        params: { property_id: propertyId },
+      })
       .then((r) => r.data),
 };
 
@@ -110,8 +270,12 @@ export const imagesApi = {
 
 // ---- Dashboard ----
 export const dashboardApi = {
-  summary: () =>
-    http.get<DashboardSummary>("/api/dashboard/summary").then((r) => r.data),
+  summary: (propertyId: string, gardenId?: string) =>
+    http
+      .get<DashboardSummary>("/api/dashboard/summary", {
+        params: { property_id: propertyId, garden_id: gardenId },
+      })
+      .then((r) => r.data),
 };
 
 // ---- Identify (Pl@ntNet) ----

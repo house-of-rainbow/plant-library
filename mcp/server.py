@@ -30,7 +30,11 @@ from app.models import (
     PlantInstanceCreate,
     PlantInstanceUpdate,
 )
-from app.repositories import PlantClassRepository, PlantInstanceRepository
+from app.repositories import (
+    PlantClassRepository,
+    PlantInstanceRepository,
+    TenancyRepository,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("plantlibrary.mcp")
@@ -79,8 +83,12 @@ def _instances() -> PlantInstanceRepository:
     return PlantInstanceRepository(get_db())
 
 
+def _tenancy() -> TenancyRepository:
+    return TenancyRepository(get_db())
+
+
 async def _read_instance(instance: PlantInstance) -> dict:
-    plant_class = await _classes().get(instance.class_id)
+    plant_class = await _classes().get(instance.property_id, instance.class_id)
     care_status = compute_care_status(instance, plant_class)
     data = instance.model_dump(mode="json")
     data["care_status"] = care_status.model_dump(mode="json")
@@ -90,39 +98,56 @@ async def _read_instance(instance: PlantInstance) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Properties (tenancy discovery)
+# --------------------------------------------------------------------------- #
+@mcp.tool
+async def list_properties() -> list[dict]:
+    """List all properties (tenants). Use a property's id to scope other tools."""
+    return [p.model_dump(mode="json") for p in await _tenancy().list_all_properties()]
+
+
+@mcp.tool
+async def list_gardens(property_id: str) -> list[dict]:
+    """List the gardens belonging to a property."""
+    return [g.model_dump(mode="json") for g in await _tenancy().list_gardens(property_id)]
+
+
+# --------------------------------------------------------------------------- #
 # Plant species (classes)
 # --------------------------------------------------------------------------- #
 @mcp.tool
-async def list_plant_species() -> list[dict]:
-    """List all plant species (care templates) in the library."""
-    return [c.model_dump(mode="json") for c in await _classes().list()]
+async def list_plant_species(property_id: str) -> list[dict]:
+    """List all plant species (care templates) in a property's library."""
+    return [c.model_dump(mode="json") for c in await _classes().list(property_id)]
 
 
 @mcp.tool
-async def get_plant_species(class_id: str) -> dict | None:
+async def get_plant_species(property_id: str, class_id: str) -> dict | None:
     """Get a single plant species by id."""
-    c = await _classes().get(class_id)
+    c = await _classes().get(property_id, class_id)
     return c.model_dump(mode="json") if c else None
 
 
 @mcp.tool
-async def create_plant_species(species: PlantClassCreate) -> dict:
+async def create_plant_species(property_id: str, species: PlantClassCreate) -> dict:
     """Create a new plant species (with optional default care requirements)."""
-    created = await _classes().create(species)
+    created = await _classes().create(property_id, species)
     return created.model_dump(mode="json")
 
 
 @mcp.tool
-async def update_plant_species(class_id: str, changes: PlantClassUpdate) -> dict | None:
+async def update_plant_species(
+    property_id: str, class_id: str, changes: PlantClassUpdate
+) -> dict | None:
     """Update fields on an existing plant species."""
-    updated = await _classes().update(class_id, changes)
+    updated = await _classes().update(property_id, class_id, changes)
     return updated.model_dump(mode="json") if updated else None
 
 
 @mcp.tool
-async def delete_plant_species(class_id: str) -> dict:
+async def delete_plant_species(property_id: str, class_id: str) -> dict:
     """Delete a plant species by id."""
-    ok = await _classes().delete(class_id)
+    ok = await _classes().delete(property_id, class_id)
     return {"deleted": ok, "id": class_id}
 
 
@@ -130,48 +155,59 @@ async def delete_plant_species(class_id: str) -> dict:
 # Plant instances
 # --------------------------------------------------------------------------- #
 @mcp.tool
-async def list_plants(class_id: str | None = None) -> list[dict]:
-    """List owned plants, optionally filtered by species (class_id). Includes
-    computed care status (watering due/overdue) for each plant."""
-    instances = await _instances().list(class_id=class_id)
+async def list_plants(
+    property_id: str, garden_id: str | None = None, class_id: str | None = None
+) -> list[dict]:
+    """List owned plants in a property, optionally filtered by garden or species
+    (class_id). Includes computed care status (watering due/overdue) for each."""
+    instances = await _instances().list(
+        property_id, garden_id=garden_id, class_id=class_id
+    )
     return [await _read_instance(i) for i in instances]
 
 
 @mcp.tool
-async def get_plant(instance_id: str) -> dict | None:
+async def get_plant(property_id: str, instance_id: str) -> dict | None:
     """Get a single plant with its enriched care status and species info."""
-    inst = await _instances().get(instance_id)
+    inst = await _instances().get(property_id, instance_id)
     return await _read_instance(inst) if inst else None
 
 
 @mcp.tool
-async def create_plant(plant: PlantInstanceCreate) -> dict:
-    """Add a new plant instance. The referenced species (class_id) must exist."""
-    if await _classes().get(plant.class_id) is None:
+async def create_plant(property_id: str, plant: PlantInstanceCreate) -> dict:
+    """Add a new plant instance. The referenced species (class_id) and garden
+    (garden_id) must exist in the property."""
+    if await _classes().get(property_id, plant.class_id) is None:
         raise ValueError(f"Referenced species '{plant.class_id}' does not exist")
-    created = await _instances().create(plant)
+    if await _tenancy().get_garden(property_id, plant.garden_id) is None:
+        raise ValueError(f"Referenced garden '{plant.garden_id}' does not exist")
+    created = await _instances().create(property_id, plant)
     return await _read_instance(created)
 
 
 @mcp.tool
-async def update_plant(instance_id: str, changes: PlantInstanceUpdate) -> dict | None:
+async def update_plant(
+    property_id: str, instance_id: str, changes: PlantInstanceUpdate
+) -> dict | None:
     """Update fields on an existing plant instance."""
-    updated = await _instances().update(instance_id, changes)
+    updated = await _instances().update(property_id, instance_id, changes)
     return await _read_instance(updated) if updated else None
 
 
 @mcp.tool
-async def delete_plant(instance_id: str) -> dict:
+async def delete_plant(property_id: str, instance_id: str) -> dict:
     """Delete a plant instance by id."""
-    ok = await _instances().delete(instance_id)
+    ok = await _instances().delete(property_id, instance_id)
     return {"deleted": ok, "id": instance_id}
 
 
 @mcp.tool
-async def log_care_event(instance_id: str, event: CareEventCreate) -> dict | None:
+async def log_care_event(
+    property_id: str, instance_id: str, event: CareEventCreate
+) -> dict | None:
     """Log a care event (watered, fertilized, repotted, pruned, pest treatment,
     note, health change, moved) for a plant and update its convenience dates."""
-    instance = await _instances().get(instance_id)
+    instance = await _instances().get(property_id, instance_id)
     if instance is None:
         return None
 
@@ -198,17 +234,17 @@ async def log_care_event(instance_id: str, event: CareEventCreate) -> dict | Non
 @mcp.tool
 async def resolve_scan(plant_id: str) -> dict | None:
     """Resolve a scanned QR/NFC label id (e.g. plant_ab12cd34) to a plant."""
-    inst = await _instances().get(plant_id)
+    inst = await _instances().get_any(plant_id)
     return await _read_instance(inst) if inst else None
 
 
 @mcp.tool
-async def care_dashboard() -> dict:
-    """Summarise the collection: totals plus plants that are overdue for water,
-    due soon, or need attention."""
-    all_classes = await _classes().list()
+async def care_dashboard(property_id: str, garden_id: str | None = None) -> dict:
+    """Summarise a property's collection: totals plus plants that are overdue for
+    water, due soon, or need attention."""
+    all_classes = await _classes().list(property_id)
     class_map = {c.id: c for c in all_classes}
-    instances = await _instances().list()
+    instances = await _instances().list(property_id, garden_id=garden_id)
 
     overdue: list[dict] = []
     due_soon: list[dict] = []

@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { classesApi, imagesApi, instancesApi, type InstanceCreate } from "../api";
 import type { HealthStatus, PlantInstance } from "../types";
 import { HEALTH_META } from "../lib/format";
+import { useTenant } from "../tenant/TenantContext";
 
 const HEALTH_OPTIONS: HealthStatus[] = [
   "thriving",
@@ -16,6 +17,7 @@ const HEALTH_OPTIONS: HealthStatus[] = [
 
 interface FormState {
   class_id: string;
+  garden_id: string;
   nickname: string;
   location: string;
   acquisition_date: string;
@@ -29,6 +31,7 @@ interface FormState {
 function toForm(p: PlantInstance): FormState {
   return {
     class_id: p.class_id,
+    garden_id: p.garden_id,
     nickname: p.nickname ?? "",
     location: p.location ?? "",
     acquisition_date: p.acquisition_date ?? "",
@@ -43,6 +46,7 @@ function toForm(p: PlantInstance): FormState {
 function toPayload(f: FormState): Partial<InstanceCreate> {
   return {
     class_id: f.class_id,
+    garden_id: f.garden_id,
     nickname: f.nickname.trim() || undefined,
     location: f.location.trim() || undefined,
     acquisition_date: f.acquisition_date || undefined,
@@ -64,6 +68,7 @@ export default function InstanceEditModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const { gardens } = useTenant();
   const [form, setForm] = useState<FormState>(() => toForm(plant));
   const [uploading, setUploading] = useState(false);
 
@@ -72,12 +77,15 @@ export default function InstanceEditModal({
     if (open) setForm(toForm(plant));
   }, [open, plant]);
 
-  const { data: classes = [] } = useQuery({ queryKey: ["classes"], queryFn: classesApi.list });
+  const { data: classes = [] } = useQuery({
+    queryKey: ["classes", plant.property_id],
+    queryFn: () => classesApi.list(plant.property_id),
+  });
 
   const save = useMutation({
-    mutationFn: () => instancesApi.update(plant.id, toPayload(form)),
+    mutationFn: () => instancesApi.update(plant.property_id, plant.id, toPayload(form)),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["instance", plant.id] });
+      qc.invalidateQueries({ queryKey: ["instance", plant.property_id, plant.id] });
       qc.invalidateQueries({ queryKey: ["scan", plant.id] });
       qc.invalidateQueries({ queryKey: ["instances"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
@@ -136,6 +144,22 @@ export default function InstanceEditModal({
                 {classes.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.common_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="label">Garden *</label>
+              <select
+                className="input"
+                required
+                value={form.garden_id}
+                onChange={(e) => setForm({ ...form, garden_id: e.target.value })}
+              >
+                {gardens.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
                   </option>
                 ))}
               </select>

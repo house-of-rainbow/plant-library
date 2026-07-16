@@ -14,7 +14,7 @@ from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 # --------------------------------------------------------------------------- #
@@ -47,6 +47,23 @@ class EventType(str, Enum):
     moved = "moved"
 
 
+class MemberRole(str, Enum):
+    owner = "owner"
+    member = "member"
+
+
+class TagScope(str, Enum):
+    """Grouping scope for a tag.
+
+    A ``None`` scope means an independent (ad-hoc) tag that is not bound to any
+    level of the hierarchy. ``property`` spans an entire property; ``garden``
+    is bound to a single garden.
+    """
+
+    property = "property"
+    garden = "garden"
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -61,6 +78,26 @@ def new_plant_id() -> str:
 
 def new_class_id() -> str:
     return f"class_{secrets.token_hex(6)}"
+
+
+def new_property_id() -> str:
+    return f"prop_{secrets.token_hex(6)}"
+
+
+def new_garden_id() -> str:
+    return f"garden_{secrets.token_hex(6)}"
+
+
+def new_membership_id() -> str:
+    return f"mem_{secrets.token_hex(6)}"
+
+
+def new_tag_id() -> str:
+    return f"tag_{secrets.token_hex(6)}"
+
+
+def _norm_email(email: str) -> str:
+    return email.strip().lower()
 
 
 # --------------------------------------------------------------------------- #
@@ -133,8 +170,8 @@ class PlantClassUpdate(BaseModel):
 
 class PlantClass(PlantClassBase):
     id: str = Field(default_factory=new_class_id)
-    # Partition key for the classes container.
-    pk: str = "class"
+    # Partition key: species are scoped to (owned by) a single property.
+    property_id: str = ""
     doc_type: str = "plant_class"
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
@@ -164,6 +201,7 @@ class CareEvent(CareEventCreate):
 # --------------------------------------------------------------------------- #
 class PlantInstanceBase(BaseModel):
     class_id: str = Field(..., description="Owning PlantClass id")
+    garden_id: str = Field(..., description="Owning Garden id")
     nickname: Optional[str] = None
     location: Optional[str] = Field(default=None, description="Room / area")
     acquisition_date: Optional[date] = None
@@ -173,6 +211,7 @@ class PlantInstanceBase(BaseModel):
     # Instance-level overrides of the class care defaults.
     care_overrides: CareDefaults = Field(default_factory=CareDefaults)
     image_urls: list[str] = Field(default_factory=list)
+    tag_ids: list[str] = Field(default_factory=list)
     notes: Optional[str] = None
 
 
@@ -182,6 +221,7 @@ class PlantInstanceCreate(PlantInstanceBase):
 
 class PlantInstanceUpdate(BaseModel):
     class_id: Optional[str] = None
+    garden_id: Optional[str] = None
     nickname: Optional[str] = None
     location: Optional[str] = None
     acquisition_date: Optional[date] = None
@@ -190,14 +230,14 @@ class PlantInstanceUpdate(BaseModel):
     health_status: Optional[HealthStatus] = None
     care_overrides: Optional[CareDefaults] = None
     image_urls: Optional[list[str]] = None
+    tag_ids: Optional[list[str]] = None
     notes: Optional[str] = None
 
 
 class PlantInstance(PlantInstanceBase):
     id: str = Field(default_factory=new_plant_id)
-    # Partition key: instances are partitioned by their owning class for
-    # efficient "all specimens of this species" queries.
-    pk: str = ""
+    # Partition key: instances are scoped to (owned by) a single property.
+    property_id: str = ""
     doc_type: str = "plant_instance"
     last_watered_at: Optional[datetime] = None
     last_fertilized_at: Optional[datetime] = None
@@ -223,3 +263,127 @@ class PlantInstanceRead(PlantInstance):
     care_status: CareStatus = Field(default_factory=CareStatus)
     scan_url: Optional[str] = None
     plant_class: Optional[PlantClass] = None
+
+
+# --------------------------------------------------------------------------- #
+# Multitenancy: Property -> Garden -> Plant, plus Memberships and Tags.
+# All tenancy documents live in a single container partitioned by
+# ``property_id`` so a whole tenant is one logical partition.
+# --------------------------------------------------------------------------- #
+class GardenBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    description: Optional[str] = None
+
+
+class GardenCreate(GardenBase):
+    is_home: bool = False
+
+
+class GardenUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    description: Optional[str] = None
+
+
+class Garden(GardenBase):
+    id: str = Field(default_factory=new_garden_id)
+    property_id: str = ""
+    doc_type: str = "garden"
+    is_home: bool = False
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class PropertyBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    address: Optional[str] = None
+
+
+class PropertyCreate(PropertyBase):
+    # Optional home garden created together with the very first property.
+    home_garden_name: Optional[str] = Field(default=None, max_length=120)
+
+
+class PropertyUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    address: Optional[str] = None
+
+
+class Property(PropertyBase):
+    id: str = Field(default_factory=new_property_id)
+    # For a property document, the partition key equals its own id.
+    property_id: str = ""
+    doc_type: str = "property"
+    owner_oid: str = ""
+    owner_email: Optional[str] = None
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class Membership(BaseModel):
+    id: str = Field(default_factory=new_membership_id)
+    property_id: str = ""
+    doc_type: str = "membership"
+    # oid is unknown until the invited user logs in for the first time; the
+    # membership is claimed by matching the (lower-cased) email.
+    user_oid: Optional[str] = None
+    user_email: str = ""
+    user_name: Optional[str] = None
+    role: MemberRole = MemberRole.member
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class MemberInvite(BaseModel):
+    email: EmailStr
+    role: MemberRole = MemberRole.member
+
+
+class MemberRoleUpdate(BaseModel):
+    role: MemberRole
+
+
+class TagBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    color: Optional[str] = None
+    scope: Optional[TagScope] = None
+    # Required when scope == garden.
+    garden_id: Optional[str] = None
+
+
+class TagCreate(TagBase):
+    pass
+
+
+class TagUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    color: Optional[str] = None
+    scope: Optional[TagScope] = None
+    garden_id: Optional[str] = None
+
+
+class Tag(TagBase):
+    id: str = Field(default_factory=new_tag_id)
+    property_id: str = ""
+    doc_type: str = "tag"
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class TagAction(BaseModel):
+    """A bulk care action applied to every plant carrying a tag."""
+
+    type: EventType
+    notes: Optional[str] = None
+    treatment: Optional[str] = None
+    new_health_status: Optional[HealthStatus] = None
+
+
+class TagBulkInstances(BaseModel):
+    instance_ids: list[str] = Field(default_factory=list)
+
+
+# Enriched read models returned to the client.
+class PropertyRead(Property):
+    role: MemberRole = MemberRole.member
+    gardens: list[Garden] = Field(default_factory=list)
+    member_count: int = 0

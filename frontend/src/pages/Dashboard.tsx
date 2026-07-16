@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { dashboardApi } from "../api";
 import PlantCard from "../components/PlantCard";
+import { useTenant } from "../tenant/TenantContext";
 
 function StatCard({
   label,
@@ -34,9 +35,11 @@ function StatCard({
 }
 
 export default function Dashboard() {
+  const { propertyId, gardenId } = useTenant();
   const { data, isLoading } = useQuery({
-    queryKey: ["dashboard"],
-    queryFn: dashboardApi.summary,
+    queryKey: ["dashboard", propertyId, gardenId],
+    queryFn: () => dashboardApi.summary(propertyId!, gardenId ?? undefined),
+    enabled: !!propertyId,
   });
 
   return (

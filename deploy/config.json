@@ -11,7 +11,8 @@
   "cosmos": {
     "databaseName": "plantlibrary",
     "classesContainer": "plant_classes",
-    "instancesContainer": "plant_instances"
+    "instancesContainer": "plant_instances",
+    "tenancyContainer": "tenancy"
   },
   "storage": {
     "blobContainerName": "plant-images"

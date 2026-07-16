@@ -71,24 +71,45 @@ def main() -> int:
     with httpx.Client(base_url=BASE, timeout=30) as client:
         client.get("/api/health").raise_for_status()
 
+        # 1. Create the demo property with its Home garden.
+        r = client.post(
+            "/api/properties",
+            json={"name": "Burien Station", "home_garden_name": "Home"},
+        )
+        r.raise_for_status()
+        prop = r.json()
+        property_id = prop["id"]
+        home_garden = next(
+            (g for g in prop.get("gardens", []) if g.get("is_home")),
+            prop.get("gardens", [{}])[0] if prop.get("gardens") else None,
+        )
+        garden_id = home_garden["id"]
+        print(f"property: {prop['name']} -> {property_id}")
+        print(f"garden:   {home_garden['name']} -> {garden_id}")
+
+        params = {"property_id": property_id}
+
+        # 2. Seed the property's species library.
         ids: dict[str, str] = {}
         for s in SPECIES:
-            r = client.post("/api/classes", json=s)
+            r = client.post("/api/classes", params=params, json=s)
             r.raise_for_status()
             ids[s["common_name"]] = r.json()["id"]
-            print(f"species: {s['common_name']} -> {ids[s['common_name']]}")
+            print(f"species:  {s['common_name']} -> {ids[s['common_name']]}")
 
+        # 3. Seed plants into the Home garden.
         for p in PLANTS:
             payload = {
                 "class_id": ids[p["species"]],
+                "garden_id": garden_id,
                 "nickname": p["nickname"],
                 "location": p["location"],
                 "health_status": "healthy",
             }
-            r = client.post("/api/instances", json=payload)
+            r = client.post("/api/instances", params=params, json=payload)
             r.raise_for_status()
             inst = r.json()
-            print(f"plant:   {p['nickname']} -> {inst['id']}  scan: {inst['scan_url']}")
+            print(f"plant:    {p['nickname']} -> {inst['id']}  scan: {inst['scan_url']}")
 
     print("\nSeed complete.")
     return 0

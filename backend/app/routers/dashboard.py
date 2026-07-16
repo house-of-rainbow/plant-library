@@ -1,14 +1,18 @@
 """Dashboard summary: care due/overdue aggregation for the Operations view."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from ..auth import CurrentUser, get_current_user
 from ..care import compute_care_status
 from ..config import Settings, get_settings
-from ..deps import class_repo, instance_repo
+from ..deps import authorize, class_repo, instance_repo, tenancy_repo
 from ..models import PlantInstanceRead
-from ..repositories import PlantClassRepository, PlantInstanceRepository
+from ..repositories import (
+    PlantClassRepository,
+    PlantInstanceRepository,
+    TenancyRepository,
+)
 from .instances import _to_read
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -16,14 +20,18 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 @router.get("/summary")
 async def summary(
+    property_id: str = Query(...),
+    garden_id: str | None = Query(default=None),
     repo: PlantInstanceRepository = Depends(instance_repo),
     classes: PlantClassRepository = Depends(class_repo),
+    tenancy: TenancyRepository = Depends(tenancy_repo),
     settings: Settings = Depends(get_settings),
-    _: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    all_classes = await classes.list()
+    await authorize(tenancy, property_id, user)
+    all_classes = await classes.list(property_id)
     class_map = {c.id: c for c in all_classes}
-    instances = await repo.list()
+    instances = await repo.list(property_id, garden_id=garden_id)
 
     total = len(instances)
     watering_overdue: list[PlantInstanceRead] = []

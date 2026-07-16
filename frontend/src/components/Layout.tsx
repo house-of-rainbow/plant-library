@@ -2,18 +2,26 @@ import { NavLink, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import AmbientScene from "../three/AmbientScene";
 import AccountMenu from "./AccountMenu";
+import TenantSwitcher from "./TenantSwitcher";
 import { appConfig } from "../config";
+import { useTenant } from "../tenant/TenantContext";
 
-const NAV = [
+const BASE_NAV = [
   { to: "/", label: "Dashboard", icon: "◎", end: true },
   { to: "/species", label: "Species", icon: "❦" },
   { to: "/plants", label: "Plants", icon: "🌿" },
+  { to: "/groups", label: "Groups", icon: "🏷️" },
   { to: "/ops", label: "Operations", icon: "📱" },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const isScan = location.pathname.startsWith("/scan");
+  const { isOwner } = useTenant();
+
+  const NAV = isOwner
+    ? [...BASE_NAV, { to: "/members", label: "Members", icon: "👥" }]
+    : BASE_NAV;
 
   return (
     <div className="min-h-full">
@@ -21,17 +29,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       {!isScan && (
         <header className="sticky top-0 z-30 px-4 sm:px-8 py-4">
-          <div className="glass mx-auto max-w-7xl px-4 sm:px-6 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">🪴</span>
-              <div className="leading-tight">
-                <div className="font-display text-lg font-semibold tracking-tight">
-                  Burien Station
-                </div>
-                <div className="text-[11px] uppercase tracking-[0.2em] text-canopy-300/70">
-                  Plant Library
-                </div>
-              </div>
+          <div className="glass mx-auto max-w-7xl px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="text-2xl hidden sm:block">🪴</span>
+              <TenantSwitcher />
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">

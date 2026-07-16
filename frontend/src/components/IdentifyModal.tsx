@@ -151,11 +151,13 @@ function StepRow({
  */
 export default function IdentifyModal({
   classes,
+  propertyId,
   open,
   onClose,
   onUse,
 }: {
   classes: PlantClass[];
+  propertyId: string;
   open: boolean;
   onClose: () => void;
   onUse: (result: { classId: string; imageUrls: string[] }) => void;
@@ -269,7 +271,7 @@ export default function IdentifyModal({
               .filter(Boolean)
               .join("\n")
           : undefined;
-        cls = await classesApi.create({
+        cls = await classesApi.create(propertyId, {
           common_name:
             candidate.common_name ||
             candidate.scientific_name_without_author ||

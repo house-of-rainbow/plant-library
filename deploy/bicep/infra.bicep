@@ -32,6 +32,7 @@ param tags object = {}
 param cosmosDatabaseName string
 param classesContainer string
 param instancesContainer string
+param tenancyContainer string
 
 // Storage
 param blobContainerName string
@@ -177,7 +178,7 @@ resource classesCol 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containe
       id: classesContainer
       partitionKey: {
         paths: [
-          '/pk'
+          '/property_id'
         ]
         kind: 'Hash'
       }
@@ -193,7 +194,25 @@ resource instancesCol 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/contai
       id: instancesContainer
       partitionKey: {
         paths: [
-          '/pk'
+          '/property_id'
+        ]
+        kind: 'Hash'
+      }
+    }
+  }
+}
+
+// Tenancy container multiplexes property / garden / membership / tag documents,
+// all partitioned by /property_id so a whole tenant is one logical partition.
+resource tenancyCol 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-11-15' = {
+  parent: cosmosDb
+  name: tenancyContainer
+  properties: {
+    resource: {
+      id: tenancyContainer
+      partitionKey: {
+        paths: [
+          '/property_id'
         ]
         kind: 'Hash'
       }

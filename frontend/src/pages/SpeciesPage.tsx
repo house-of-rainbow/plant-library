@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { classesApi } from "../api";
 import type { PlantClass, SunlightLevel } from "../types";
 import { SUNLIGHT_META } from "../lib/format";
+import { useTenant } from "../tenant/TenantContext";
 
 const SUNLIGHT_OPTIONS: SunlightLevel[] = ["low", "medium", "bright_indirect", "direct"];
 
@@ -93,20 +94,22 @@ function toPayload(f: FormState): Partial<PlantClass> {
 
 export default function SpeciesPage() {
   const qc = useQueryClient();
+  const { propertyId } = useTenant();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<PlantClass | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
 
   const { data: classes = [], isLoading } = useQuery({
-    queryKey: ["classes"],
-    queryFn: classesApi.list,
+    queryKey: ["classes", propertyId],
+    queryFn: () => classesApi.list(propertyId!),
+    enabled: !!propertyId,
   });
 
   const save = useMutation({
     mutationFn: (f: FormState) =>
       editing
-        ? classesApi.update(editing.id, toPayload(f))
-        : classesApi.create(toPayload(f)),
+        ? classesApi.update(propertyId!, editing.id, toPayload(f))
+        : classesApi.create(propertyId!, toPayload(f)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["classes"] });
       closeForm();
@@ -114,7 +117,7 @@ export default function SpeciesPage() {
   });
 
   const remove = useMutation({
-    mutationFn: (id: string) => classesApi.remove(id),
+    mutationFn: (id: string) => classesApi.remove(propertyId!, id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["classes"] }),
   });
 

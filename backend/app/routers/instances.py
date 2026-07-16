@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from ..auth import CurrentUser, get_current_user
 from ..care import compute_care_status
 from ..config import Settings, get_settings
-from ..deps import class_repo, instance_repo
+from ..deps import authorize, class_repo, instance_repo, tenancy_repo
 from ..models import (
     CareEvent,
     CareEventCreate,
@@ -18,7 +18,11 @@ from ..models import (
     PlantInstanceRead,
     PlantInstanceUpdate,
 )
-from ..repositories import PlantClassRepository, PlantInstanceRepository
+from ..repositories import (
+    PlantClassRepository,
+    PlantInstanceRepository,
+    TenancyRepository,
+)
 
 router = APIRouter(prefix="/api/instances", tags=["instances"])
 
@@ -28,7 +32,7 @@ async def _to_read(
     classes: PlantClassRepository,
     settings: Settings,
 ) -> PlantInstanceRead:
-    plant_class = await classes.get(instance.class_id)
+    plant_class = await classes.get(instance.property_id, instance.class_id)
     status_ = compute_care_status(instance, plant_class)
     read = PlantInstanceRead(**instance.model_dump())
     read.care_status = status_
@@ -39,39 +43,54 @@ async def _to_read(
 
 @router.get("", response_model=list[PlantInstanceRead])
 async def list_instances(
+    property_id: str = Query(...),
+    garden_id: str | None = Query(default=None),
     class_id: str | None = Query(default=None),
+    tag_id: str | None = Query(default=None),
     repo: PlantInstanceRepository = Depends(instance_repo),
     classes: PlantClassRepository = Depends(class_repo),
+    tenancy: TenancyRepository = Depends(tenancy_repo),
     settings: Settings = Depends(get_settings),
-    _: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    instances = await repo.list(class_id=class_id)
+    await authorize(tenancy, property_id, user)
+    instances = await repo.list(
+        property_id, garden_id=garden_id, class_id=class_id, tag_id=tag_id
+    )
     return [await _to_read(i, classes, settings) for i in instances]
 
 
 @router.post("", response_model=PlantInstanceRead, status_code=status.HTTP_201_CREATED)
 async def create_instance(
     payload: PlantInstanceCreate,
+    property_id: str = Query(...),
     repo: PlantInstanceRepository = Depends(instance_repo),
     classes: PlantClassRepository = Depends(class_repo),
+    tenancy: TenancyRepository = Depends(tenancy_repo),
     settings: Settings = Depends(get_settings),
-    _: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    if await classes.get(payload.class_id) is None:
+    await authorize(tenancy, property_id, user)
+    if await classes.get(property_id, payload.class_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Referenced class does not exist")
-    created = await repo.create(payload)
+    if await tenancy.get_garden(property_id, payload.garden_id) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Referenced garden does not exist")
+    created = await repo.create(property_id, payload)
     return await _to_read(created, classes, settings)
 
 
 @router.get("/{instance_id}", response_model=PlantInstanceRead)
 async def get_instance(
     instance_id: str,
+    property_id: str = Query(...),
     repo: PlantInstanceRepository = Depends(instance_repo),
     classes: PlantClassRepository = Depends(class_repo),
+    tenancy: TenancyRepository = Depends(tenancy_repo),
     settings: Settings = Depends(get_settings),
-    _: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    instance = await repo.get(instance_id)
+    await authorize(tenancy, property_id, user)
+    instance = await repo.get(property_id, instance_id)
     if instance is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plant instance not found")
     return await _to_read(instance, classes, settings)
@@ -81,12 +100,15 @@ async def get_instance(
 async def update_instance(
     instance_id: str,
     payload: PlantInstanceUpdate,
+    property_id: str = Query(...),
     repo: PlantInstanceRepository = Depends(instance_repo),
     classes: PlantClassRepository = Depends(class_repo),
+    tenancy: TenancyRepository = Depends(tenancy_repo),
     settings: Settings = Depends(get_settings),
-    _: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    updated = await repo.update(instance_id, payload)
+    await authorize(tenancy, property_id, user)
+    updated = await repo.update(property_id, instance_id, payload)
     if updated is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plant instance not found")
     return await _to_read(updated, classes, settings)
@@ -95,10 +117,13 @@ async def update_instance(
 @router.delete("/{instance_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_instance(
     instance_id: str,
+    property_id: str = Query(...),
     repo: PlantInstanceRepository = Depends(instance_repo),
-    _: CurrentUser = Depends(get_current_user),
+    tenancy: TenancyRepository = Depends(tenancy_repo),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    if not await repo.delete(instance_id):
+    await authorize(tenancy, property_id, user)
+    if not await repo.delete(property_id, instance_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plant instance not found")
 
 
@@ -106,12 +131,15 @@ async def delete_instance(
 async def add_care_event(
     instance_id: str,
     payload: CareEventCreate,
+    property_id: str = Query(...),
     repo: PlantInstanceRepository = Depends(instance_repo),
     classes: PlantClassRepository = Depends(class_repo),
+    tenancy: TenancyRepository = Depends(tenancy_repo),
     settings: Settings = Depends(get_settings),
-    _: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    instance = await repo.get(instance_id)
+    await authorize(tenancy, property_id, user)
+    instance = await repo.get(property_id, instance_id)
     if instance is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plant instance not found")
 

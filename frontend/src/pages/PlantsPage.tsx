@@ -6,6 +6,7 @@ import type { HealthStatus } from "../types";
 import { HEALTH_META } from "../lib/format";
 import PlantCard from "../components/PlantCard";
 import IdentifyModal from "../components/IdentifyModal";
+import { useTenant } from "../tenant/TenantContext";
 
 const HEALTH_OPTIONS: HealthStatus[] = [
   "thriving",
@@ -17,6 +18,7 @@ const HEALTH_OPTIONS: HealthStatus[] = [
 
 export default function PlantsPage() {
   const qc = useQueryClient();
+  const { propertyId, gardenId, gardens } = useTenant();
   const [open, setOpen] = useState(false);
   const [identifyOpen, setIdentifyOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -24,25 +26,31 @@ export default function PlantsPage() {
 
   const [form, setForm] = useState<InstanceCreate>({
     class_id: "",
+    garden_id: gardenId ?? "",
     nickname: "",
     location: "",
     health_status: "healthy",
     image_urls: [],
   });
 
-  const { data: classes = [] } = useQuery({ queryKey: ["classes"], queryFn: classesApi.list });
+  const { data: classes = [] } = useQuery({
+    queryKey: ["classes", propertyId],
+    queryFn: () => classesApi.list(propertyId!),
+    enabled: !!propertyId,
+  });
   const { data: plants = [], isLoading } = useQuery({
-    queryKey: ["instances"],
-    queryFn: () => instancesApi.list(),
+    queryKey: ["instances", propertyId, gardenId],
+    queryFn: () => instancesApi.list(propertyId!, { garden_id: gardenId ?? undefined }),
+    enabled: !!propertyId,
   });
 
   const create = useMutation({
-    mutationFn: (payload: InstanceCreate) => instancesApi.create(payload),
+    mutationFn: (payload: InstanceCreate) => instancesApi.create(propertyId!, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["instances"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       setOpen(false);
-      setForm({ class_id: "", nickname: "", location: "", health_status: "healthy", image_urls: [] });
+      setForm({ class_id: "", garden_id: gardenId ?? "", nickname: "", location: "", health_status: "healthy", image_urls: [] });
     },
   });
 
@@ -154,6 +162,23 @@ export default function PlantsPage() {
                 </select>
               </div>
 
+              <div>
+                <label className="label">Garden *</label>
+                <select
+                  className="input"
+                  required
+                  value={form.garden_id}
+                  onChange={(e) => setForm({ ...form, garden_id: e.target.value })}
+                >
+                  <option value="">Select a garden…</option>
+                  {gardens.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">Nickname</label>
@@ -225,11 +250,13 @@ export default function PlantsPage() {
 
       <IdentifyModal
         classes={classes}
+        propertyId={propertyId!}
         open={identifyOpen}
         onClose={() => setIdentifyOpen(false)}
         onUse={({ classId, imageUrls }) => {
           setForm({
             class_id: classId,
+            garden_id: gardenId ?? "",
             nickname: "",
             location: "",
             health_status: "healthy",

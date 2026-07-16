@@ -35,6 +35,7 @@ param acrSubscriptionId string = subscription().subscriptionId
 param cosmosDatabaseName string
 param classesContainer string
 param instancesContainer string
+param tenancyContainer string
 param blobContainerName string
 
 // Auth (non-secret)
@@ -188,6 +189,7 @@ var backendBaseEnv = [
   { name: 'COSMOS_DATABASE', value: cosmosDatabaseName }
   { name: 'COSMOS_CLASSES_CONTAINER', value: classesContainer }
   { name: 'COSMOS_INSTANCES_CONTAINER', value: instancesContainer }
+  { name: 'COSMOS_TENANCY_CONTAINER', value: tenancyContainer }
   { name: 'COSMOS_ALLOW_INSECURE', value: 'false' }
   { name: 'AZURE_STORAGE_CONNECTION_STRING', secretRef: 'storage-connection-string' }
   { name: 'AZURE_STORAGE_CONTAINER', value: blobContainerName }
@@ -245,6 +247,7 @@ var mcpEnv = concat(
     { name: 'COSMOS_DATABASE', value: cosmosDatabaseName }
     { name: 'COSMOS_CLASSES_CONTAINER', value: classesContainer }
     { name: 'COSMOS_INSTANCES_CONTAINER', value: instancesContainer }
+    { name: 'COSMOS_TENANCY_CONTAINER', value: tenancyContainer }
     { name: 'COSMOS_ALLOW_INSECURE', value: 'false' }
     { name: 'SCAN_BASE_URL', value: 'https://${frontendFqdn}/scan' }
   ],

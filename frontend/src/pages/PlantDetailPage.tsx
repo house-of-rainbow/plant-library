@@ -4,21 +4,23 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { instancesApi } from "../api";
 import PlantDetail from "../components/PlantDetail";
 import InstanceEditModal from "../components/InstanceEditModal";
+import { useTenant } from "../tenant/TenantContext";
 
 export default function PlantDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { propertyId } = useTenant();
   const [editing, setEditing] = useState(false);
 
   const { data: plant, isLoading } = useQuery({
-    queryKey: ["instance", id],
-    queryFn: () => instancesApi.get(id),
-    enabled: !!id,
+    queryKey: ["instance", propertyId, id],
+    queryFn: () => instancesApi.get(propertyId!, id),
+    enabled: !!id && !!propertyId,
   });
 
   const remove = useMutation({
-    mutationFn: () => instancesApi.remove(id),
+    mutationFn: () => instancesApi.remove(propertyId!, id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["instances"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });

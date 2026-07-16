@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     cosmos_database: str = "plantlibrary"
     cosmos_classes_container: str = "plant_classes"
     cosmos_instances_container: str = "plant_instances"
+    cosmos_tenancy_container: str = "tenancy"
     cosmos_allow_insecure: bool = False
 
     # Blob storage
