@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
+import { gardensApi } from "../api";
 import { useTenant } from "../tenant/TenantContext";
 import PropertyWizard from "./wizard/PropertyWizard";
 
@@ -7,6 +9,7 @@ export default function TenantSwitcher() {
   const {
     properties,
     property,
+    isOwner,
     setPropertyId,
     gardens,
     garden,
@@ -15,7 +18,31 @@ export default function TenantSwitcher() {
   } = useTenant();
   const [open, setOpen] = useState(false);
   const [wizard, setWizard] = useState(false);
+  const [addingGarden, setAddingGarden] = useState(false);
+  const [gardenName, setGardenName] = useState("");
+  const [gardenError, setGardenError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+
+  const createGarden = useMutation({
+    mutationFn: () =>
+      gardensApi.create(property.id, {
+        name: gardenName.trim(),
+      }),
+    onSuccess: async (created) => {
+      await refresh();
+      setGardenId(created.id);
+      setGardenName("");
+      setGardenError(null);
+      setAddingGarden(false);
+      setOpen(false);
+    },
+    onError: (error: unknown) => {
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        "Could not create garden.";
+      setGardenError(detail);
+    },
+  });
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -51,7 +78,7 @@ export default function TenantSwitcher() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.97 }}
             transition={{ duration: 0.15 }}
-            className="absolute left-0 mt-2 w-72 glass p-3 z-40 max-h-[70vh] overflow-y-auto no-scrollbar"
+            className="absolute left-0 mt-2 w-72 p-3 z-40 max-h-[70vh] overflow-y-auto no-scrollbar rounded-3xl border border-canopy-400/25 bg-[#071a12]/95 backdrop-blur-xl shadow-2xl"
           >
             <div className="text-[11px] uppercase tracking-wider text-canopy-300/70 px-2 pb-1">
               Properties
@@ -88,35 +115,90 @@ export default function TenantSwitcher() {
               + New property
             </button>
 
-            {gardens.length > 0 && (
-              <>
-                <div className="my-2 h-px bg-white/10" />
-                <div className="text-[11px] uppercase tracking-wider text-canopy-300/70 px-2 pb-1">
-                  Gardens
-                </div>
-                <div className="space-y-1">
-                  {gardens.map((g) => (
-                    <button
-                      key={g.id}
-                      onClick={() => {
-                        setGardenId(g.id);
-                        setOpen(false);
-                      }}
-                      className={`w-full flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
-                        g.id === garden?.id
-                          ? "bg-canopy-500/20 text-canopy-100"
-                          : "hover:bg-white/10 text-white/80"
-                      }`}
-                    >
-                      <span>🌿</span>
-                      <span className="truncate">{g.name}</span>
-                      {g.is_home && (
-                        <span className="ml-auto text-[10px] text-white/40">home</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </>
+            <div className="my-2 h-px bg-white/10" />
+            <div className="text-[11px] uppercase tracking-wider text-canopy-300/70 px-2 pb-1">
+              Gardens
+            </div>
+            {gardens.length > 0 ? (
+              <div className="space-y-1">
+                {gardens.map((g) => (
+                  <button
+                    key={g.id}
+                    onClick={() => {
+                      setGardenId(g.id);
+                      setOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
+                      g.id === garden?.id
+                        ? "bg-canopy-500/20 text-canopy-100"
+                        : "hover:bg-white/10 text-white/80"
+                    }`}
+                  >
+                    <span>🌿</span>
+                    <span className="truncate">{g.name}</span>
+                    {g.is_home && (
+                      <span className="ml-auto text-[10px] text-white/40">home</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="px-2 text-xs text-white/45">No gardens yet.</p>
+            )}
+
+            {isOwner && (
+              <div className="mt-2 space-y-2">
+                {!addingGarden ? (
+                  <button
+                    onClick={() => {
+                      setAddingGarden(true);
+                      setGardenError(null);
+                    }}
+                    className="w-full text-left rounded-xl px-3 py-2 text-sm text-canopy-300 hover:bg-white/10"
+                  >
+                    + New garden
+                  </button>
+                ) : (
+                  <form
+                    className="space-y-2 px-1"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (gardenName.trim()) {
+                        createGarden.mutate();
+                      }
+                    }}
+                  >
+                    <input
+                      autoFocus
+                      className="input"
+                      placeholder="Garden name"
+                      value={gardenName}
+                      onChange={(e) => setGardenName(e.target.value)}
+                    />
+                    {gardenError && <p className="text-xs text-red-300">{gardenError}</p>}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="btn-ghost text-sm py-1.5"
+                        onClick={() => {
+                          setAddingGarden(false);
+                          setGardenName("");
+                          setGardenError(null);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="btn-primary text-sm py-1.5 flex-1"
+                        disabled={!gardenName.trim() || createGarden.isPending}
+                      >
+                        {createGarden.isPending ? "Creating…" : "Create"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
             )}
           </motion.div>
         )}
