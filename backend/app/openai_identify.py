@@ -29,6 +29,17 @@ _PROMPT = (
 )
 
 
+def _prompt_with_context(base_prompt: str, prompt_context: str | None) -> str:
+    prompt_context = (prompt_context or "").strip()
+    if not prompt_context:
+        return base_prompt
+    return (
+        f"{base_prompt}\n\n"
+        "Additional user-provided context about the plant. Treat this as a helpful clue, not a guaranteed fact; use it to break ties or guide harder identifications, but do not override clear visual evidence when the clue appears wrong.\n"
+        f"User context: {prompt_context}"
+    )
+
+
 class LLMPlantCandidate(BaseModel):
     """The plant schema returned by the model, with a confidence score."""
 
@@ -98,6 +109,7 @@ async def identify_with_openai(
     *,
     api_key: str,
     model: str,
+    prompt_context: str | None = None,
 ) -> LLMIdentification:
     """Identify a plant from image bytes using the OpenAI Responses API.
 
@@ -105,7 +117,9 @@ async def identify_with_openai(
     """
     client = AsyncOpenAI(api_key=api_key)
 
-    content: list[dict] = [{"type": "input_text", "text": _PROMPT}]
+    content: list[dict] = [
+        {"type": "input_text", "text": _prompt_with_context(_PROMPT, prompt_context)}
+    ]
     for data, content_type in images:
         b64 = base64.b64encode(data).decode("ascii")
         content.append(
@@ -134,12 +148,13 @@ async def consolidate_with_openai(
     *,
     api_key: str,
     model: str,
+    prompt_context: str | None = None,
 ) -> Consolidation:
     """Reconcile the two engines' candidate lists into a final ranking."""
     client = AsyncOpenAI(api_key=api_key)
 
     text = (
-        f"{_CONSOLIDATE_PROMPT}\n\n"
+        f"{_prompt_with_context(_CONSOLIDATE_PROMPT, prompt_context)}\n\n"
         f"Pl@ntNet candidates: {plantnet_summary}\n"
         f"AI vision candidates: {openai_summary}\n"
     )

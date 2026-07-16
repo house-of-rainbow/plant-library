@@ -2,6 +2,8 @@ import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import type { PlantInstance } from "../types";
 import { HEALTH_META, relativeDays } from "../lib/format";
+import { formatPlantLocation } from "../lib/plantLocation";
+import { useTenant } from "../tenant/TenantContext";
 import PlantOrb from "../three/PlantOrb";
 
 export default function PlantCard({
@@ -12,10 +14,12 @@ export default function PlantCard({
   index?: number;
 }) {
   const navigate = useNavigate();
+  const { property, gardens } = useTenant();
   const meta = HEALTH_META[plant.health_status];
   const title = plant.nickname || plant.plant_class?.common_name || "Unnamed plant";
   const overdue = plant.care_status.watering_overdue;
   const cover = plant.image_urls[0] || plant.plant_class?.hero_image_url || null;
+  const locationLabel = formatPlantLocation(plant, property, gardens);
 
   return (
     <motion.button
@@ -64,7 +68,7 @@ export default function PlantCard({
 
         <div className="mt-3 flex items-center justify-between text-xs">
           <span className="text-white/50">
-            {plant.location ? `📍 ${plant.location}` : "📍 —"}
+            {`📍 ${locationLabel}`}
           </span>
           <span
             className={`font-medium ${

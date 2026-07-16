@@ -332,9 +332,13 @@ export interface IdentifyStreamEvent {
 }
 
 export const identifyApi = {
-  identify: async (files: File[]): Promise<IdentifyResponse> => {
+  identify: async (
+    files: File[],
+    promptContext?: string
+  ): Promise<IdentifyResponse> => {
     const form = new FormData();
     files.forEach((f) => form.append("images", f));
+    if (promptContext?.trim()) form.append("prompt_context", promptContext.trim());
     const { data } = await http.post<IdentifyResponse>("/api/identify", form, {
       headers: { "Content-Type": "multipart/form-data" },
     });
@@ -344,10 +348,12 @@ export const identifyApi = {
   // Ensemble identify with live progress (newline-delimited JSON stream).
   identifyStream: async (
     files: File[],
+    promptContext: string | undefined,
     onEvent: (e: IdentifyStreamEvent) => void
   ): Promise<void> => {
     const form = new FormData();
     files.forEach((f) => form.append("images", f));
+    if (promptContext?.trim()) form.append("prompt_context", promptContext.trim());
     const headers = await authHeaders();
     const resp = await fetch(`${baseURL}/api/identify/stream`, {
       method: "POST",

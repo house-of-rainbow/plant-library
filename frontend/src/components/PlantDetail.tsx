@@ -3,6 +3,8 @@ import { motion } from "framer-motion";
 import type { EventType, PlantInstance } from "../types";
 import { instancesApi, scanApi } from "../api";
 import { HEALTH_META, SUNLIGHT_META, formatDate, relativeDays } from "../lib/format";
+import { formatPlantLocation } from "../lib/plantLocation";
+import { useTenant } from "../tenant/TenantContext";
 import PlantOrb from "../three/PlantOrb";
 
 const EVENT_LABELS: Record<EventType, string> = {
@@ -28,9 +30,11 @@ export default function PlantDetail({
   compact?: boolean;
 }) {
   const qc = useQueryClient();
+  const { property, gardens } = useTenant();
   const meta = HEALTH_META[plant.health_status];
   const care = plant.care_status.effective_care;
   const title = plant.nickname || plant.plant_class?.common_name || "Plant";
+  const locationLabel = formatPlantLocation(plant, property, gardens);
 
   const logEvent = useMutation({
     mutationFn: (type: EventType) =>
@@ -138,7 +142,7 @@ export default function PlantDetail({
         </div>
         <div className="glass-soft p-4">
           <div className="text-xs uppercase tracking-wider text-white/40">Location</div>
-          <div className="text-lg font-semibold">{plant.location || "—"}</div>
+          <div className="text-lg font-semibold">{locationLabel}</div>
         </div>
         <div className="glass-soft p-4">
           <div className="text-xs uppercase tracking-wider text-white/40">Acquired</div>

@@ -160,11 +160,12 @@ export default function IdentifyModal({
   propertyId: string;
   open: boolean;
   onClose: () => void;
-  onUse: (result: { classId: string; imageUrls: string[] }) => void;
+  onUse: (result: { classId: string; imageUrls: string[]; promptContext: string }) => void;
 }) {
   const qc = useQueryClient();
   const [files, setFiles] = useState<File[]>([]);
   const [running, setRunning] = useState(false);
+  const [promptContext, setPromptContext] = useState("");
   const [steps, setSteps] = useState<StepState>(EMPTY_STEPS);
   const [candidates, setCandidates] = useState<IdentifyCandidate[] | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
@@ -181,6 +182,7 @@ export default function IdentifyModal({
   function reset() {
     setFiles([]);
     setRunning(false);
+    setPromptContext("");
     setSteps(EMPTY_STEPS);
     setCandidates(null);
     setSummary(null);
@@ -223,6 +225,7 @@ export default function IdentifyModal({
     setShowDetails(false);
     try {
       await identifyApi.identifyStream(files, (e) => {
+      await identifyApi.identifyStream(files, promptContext, (e) => {
         if (e.step === "complete") {
           setCandidates(e.candidates ?? []);
           setSummary(e.summary ?? null);
@@ -288,7 +291,7 @@ export default function IdentifyModal({
         } as Partial<PlantClass>);
         qc.invalidateQueries({ queryKey: ["classes"] });
       }
-      return { classId: cls.id, imageUrls };
+      return { classId: cls.id, imageUrls, promptContext: promptContext.trim() };
     },
     onSuccess: (r) => {
       onUse(r);
@@ -319,6 +322,19 @@ export default function IdentifyModal({
               <h2 className="font-display text-2xl font-bold">📷 Identify a plant</h2>
               <p className="text-sm text-white/50">
                 Snap up to {MAX_PHOTOS} photos — we cross-check Pl@ntNet and AI vision.
+              </p>
+            </div>
+
+            <div>
+              <label className="label">Helpful context for AI vision (optional)</label>
+              <textarea
+                className="input min-h-[84px]"
+                value={promptContext}
+                onChange={(e) => setPromptContext(e.target.value)}
+                placeholder="Example: I bought this as a Red Banana at Burien Nursery, but the label might be wrong."
+              />
+              <p className="mt-1 text-xs text-white/45">
+                Added to GPT Vision and consolidation only. Useful when you already have a likely name, source, or note about the plant.
               </p>
             </div>
 

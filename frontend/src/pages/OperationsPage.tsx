@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { classesApi, dashboardApi, instancesApi } from "../api";
 import type { PlantInstance } from "../types";
 import { HEALTH_META, relativeDays } from "../lib/format";
+import { formatPlantLocation } from "../lib/plantLocation";
 import QrScanner from "../components/QrScanner";
 import IdentifyModal from "../components/IdentifyModal";
 import { useTenant } from "../tenant/TenantContext";
@@ -12,8 +13,10 @@ import { useTenant } from "../tenant/TenantContext";
 function CareRow({ plant }: { plant: PlantInstance }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { property, gardens } = useTenant();
   const meta = HEALTH_META[plant.health_status];
   const overdue = plant.care_status.watering_overdue;
+  const locationLabel = formatPlantLocation(plant, property, gardens);
 
   const water = useMutation({
     mutationFn: () =>
@@ -47,7 +50,7 @@ function CareRow({ plant }: { plant: PlantInstance }) {
           </div>
           <div className={`text-xs ${overdue ? "text-red-300" : "text-white/50"}`}>
             💧 {relativeDays(plant.care_status.days_until_watering)}
-            {plant.location ? ` · ${plant.location}` : ""}
+            {locationLabel !== "—" ? ` · ${locationLabel}` : ""}
           </div>
         </div>
       </button>
@@ -82,12 +85,21 @@ export default function OperationsPage() {
 
   // Snap → identify → create the plant → jump to its detail to fill in the rest.
   const quickAdd = useMutation({
-    mutationFn: ({ classId, imageUrls }: { classId: string; imageUrls: string[] }) =>
+    mutationFn: ({
+      classId,
+      imageUrls,
+      promptContext,
+    }: {
+      classId: string;
+      imageUrls: string[];
+      promptContext: string;
+    }) =>
       instancesApi.create(propertyId!, {
         class_id: classId,
         garden_id: gardenId!,
         health_status: "healthy",
         image_urls: imageUrls,
+        notes: promptContext ? `Identification context: ${promptContext}` : undefined,
       }),
     onSuccess: (plant) => {
       qc.invalidateQueries({ queryKey: ["instances"] });

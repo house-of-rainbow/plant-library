@@ -253,7 +253,7 @@ export default function PlantsPage() {
         propertyId={propertyId!}
         open={identifyOpen}
         onClose={() => setIdentifyOpen(false)}
-        onUse={({ classId, imageUrls }) => {
+        onUse={({ classId, imageUrls, promptContext }) => {
           setForm({
             class_id: classId,
             garden_id: gardenId ?? "",
@@ -261,6 +261,7 @@ export default function PlantsPage() {
             location: "",
             health_status: "healthy",
             image_urls: imageUrls,
+            notes: promptContext ? `Identification context: ${promptContext}` : undefined,
           });
           setIdentifyOpen(false);
           setOpen(true);

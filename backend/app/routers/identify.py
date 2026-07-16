@@ -143,6 +143,7 @@ async def _try_plantnet(
 async def _try_openai(
     raw: list[tuple[str, bytes, str]],
     settings: Settings,
+    prompt_context: str | None = None,
 ) -> Optional[IdentifyResponse]:
     """Fallback identification via the OpenAI Responses API (Structured Outputs)."""
     if not settings.openai_api_key:
@@ -152,6 +153,7 @@ async def _try_openai(
             [(data, ct) for _, data, ct in raw],
             api_key=settings.openai_api_key,
             model=settings.openai_model,
+            prompt_context=prompt_context,
         )
     except Exception as exc:  # noqa: BLE001 - never let the fallback crash the request
         logger.warning("OpenAI identify failed: %s", exc)
@@ -176,6 +178,7 @@ async def _try_openai(
 async def identify(
     images: list[UploadFile] = File(...),
     organs: list[str] | None = Form(default=None),
+    prompt_context: str | None = Form(default=None),
     settings: Settings = Depends(get_settings),
     _: CurrentUser = Depends(get_current_user),
 ):
@@ -212,7 +215,7 @@ async def identify(
         return result
 
     # Fallback: OpenAI vision, when Pl@ntNet failed OR returned no candidates.
-    fallback = await _try_openai(raw, settings)
+    fallback = await _try_openai(raw, settings, prompt_context=prompt_context)
     if fallback is not None and (failed or not result or not result.candidates):
         # Prefer the fallback when it produced something, else keep whatever we have.
         if fallback.candidates or result is None:
@@ -257,6 +260,7 @@ def _fmt_candidates(cands: list[IdentifyCandidate]) -> str:
 @router.post("/stream")
 async def identify_stream(
     images: list[UploadFile] = File(...),
+    prompt_context: str | None = Form(default=None),
     settings: Settings = Depends(get_settings),
     _: CurrentUser = Depends(get_current_user),
 ):
@@ -281,7 +285,13 @@ async def identify_stream(
         yield line({"step": "start", "engines": {"plantnet": has_pn, "openai": has_ai}})
 
         pn_task = asyncio.create_task(_try_plantnet(raw, None, settings)) if has_pn else None
-        ai_task = asyncio.create_task(_try_openai(raw, settings)) if has_ai else None
+        ai_task = (
+            asyncio.create_task(
+                _try_openai(raw, settings, prompt_context=prompt_context)
+            )
+            if has_ai
+            else None
+        )
 
         yield line({"step": "plantnet", "status": "running" if has_pn else "skipped"})
         yield line({"step": "openai", "status": "running" if has_ai else "skipped"})
@@ -333,6 +343,7 @@ async def identify_stream(
                     _fmt_candidates(ai_cands),
                     api_key=settings.openai_api_key,
                     model=settings.openai_model,
+                    prompt_context=prompt_context,
                 )
                 pn_by_name = {
                     (c.scientific_name_without_author or c.scientific_name or "").lower(): c
