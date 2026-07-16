@@ -23,6 +23,16 @@ export default function TenantSwitcher() {
   const [gardenError, setGardenError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  if (!property) return null;
+
   const createGarden = useMutation({
     mutationFn: () =>
       gardensApi.create(property.id, {
@@ -43,16 +53,6 @@ export default function TenantSwitcher() {
       setGardenError(detail);
     },
   });
-
-  useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, []);
-
-  if (!property) return null;
 
   return (
     <div className="relative" ref={ref}>
