@@ -50,10 +50,22 @@ class LLMPlantCandidate(BaseModel):
     family: Optional[str] = None
     genus: Optional[str] = None
     confidence: float = Field(description="Confidence 0..1", ge=0, le=1)
+    description: Optional[str] = None
     watering_interval_days: Optional[int] = None
+    watering_notes: Optional[str] = None
     sunlight: Optional[SunlightLevel] = None
+    light_notes: Optional[str] = None
     fertilizing_interval_days: Optional[int] = None
     fertilizer_type: Optional[str] = None
+    fertilizer_notes: Optional[str] = None
+    repotting_interval_months: Optional[int] = None
+    soil_type: Optional[str] = None
+    pot_size: Optional[str] = None
+    hardiness_zone: Optional[str] = None
+    mature_size: Optional[str] = None
+    pruning_notes: Optional[str] = None
+    propagation_notes: Optional[str] = None
+    pests_notes: Optional[str] = None
     toxic_to_pets: Optional[bool] = None
     care_notes: Optional[str] = None
 
