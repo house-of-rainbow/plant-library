@@ -32,6 +32,7 @@ trigger:
       - backend/**
       - frontend/**
       - deploy/**
+      - mcp/**
 
 variables:
   - group: cloudflare-api # provides the secret CLOUDFLARE_API_TOKEN (used by the CustomDomains stage)
