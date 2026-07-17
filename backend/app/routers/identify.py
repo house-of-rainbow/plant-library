@@ -531,7 +531,7 @@ async def identify_stream(
                     prompt_context=prompt_context,
                 )
                 _apply_enrichment(final, enriched.candidates)
-                _apply_reference_metadata(final, references)
+                apply_reference_metadata(final, references)
                 yield line({"step": "enrich", "status": "done"})
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Final enrichment failed: %s", exc)
