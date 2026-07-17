@@ -28,7 +28,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <AmbientScene />
 
       {!isScan && (
-        <header className="sticky top-0 z-30 px-4 sm:px-8 py-4">
+        <header className="sticky top-0 z-30 px-4 sm:px-8 py-4 transform-gpu">
           <div className="glass mx-auto max-w-7xl px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <span className="text-2xl hidden sm:block">🪴</span>
@@ -75,7 +75,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Mobile bottom nav */}
       {!isScan && (
-        <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 px-4 pb-4">
+        <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 px-4 pb-4 transform-gpu">
           <div className="glass flex items-center justify-around py-2">
             {NAV.map((item) => (
               <NavLink

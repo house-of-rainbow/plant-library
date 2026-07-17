@@ -10,6 +10,14 @@ import type { PlantInstance, Position3D } from "../types";
 
 const FALLBACK_SCENE_COLOR = new THREE.Color("#8bb99d");
 
+// Plants are placed on a flat 2D map over the mesh: we keep the horizontal
+// (x/z) click location but pin the vertical axis to a constant ground height.
+const PLACEMENT_HEIGHT = 0;
+
+// Each plant renders as a raised flag on a pole so its marker/label float above
+// the mesh and stay easy to spot from any orbit angle.
+const POLE_HEIGHT = 2.4;
+
 interface GardenSceneEditorProps {
   sceneUrl?: string | null;
   sceneName?: string | null;
@@ -22,7 +30,7 @@ interface GardenSceneEditorProps {
 function roundPosition(point: THREE.Vector3): Position3D {
   return {
     x: Number(point.x.toFixed(3)),
-    y: Number(point.y.toFixed(3)),
+    y: PLACEMENT_HEIGHT,
     z: Number(point.z.toFixed(3)),
   };
 }
@@ -288,16 +296,23 @@ function PlantPin({
   const label = plant.nickname || plant.plant_class?.common_name || "Plant";
 
   return (
-    <group position={[plant.position_3d.x, plant.position_3d.y, plant.position_3d.z]}>
-      <mesh position={[0, 0.12, 0]}>
-        <sphereGeometry args={[0.08, 20, 20]} />
-        <meshStandardMaterial color={selected ? "#facc15" : "#7dd3a8"} emissive="#7dd3a8" emissiveIntensity={0.35} />
+    <group position={[plant.position_3d.x, PLACEMENT_HEIGHT, plant.position_3d.z]}>
+      {/* Base marker rooted on the ground so the pin's map location is clear. */}
+      <mesh position={[0, 0.02, 0]}>
+        <cylinderGeometry args={[0.09, 0.13, 0.04, 20]} />
+        <meshStandardMaterial color={selected ? "#facc15" : "#7dd3a8"} emissive="#7dd3a8" emissiveIntensity={0.25} />
       </mesh>
-      <mesh position={[0, -0.14, 0]}>
-        <cylinderGeometry args={[0.015, 0.015, 0.3, 12]} />
-        <meshStandardMaterial color="#d1fae5" />
+      {/* Flagpole rising from the ground up to the floating marker. */}
+      <mesh position={[0, POLE_HEIGHT / 2, 0]}>
+        <cylinderGeometry args={[0.02, 0.02, POLE_HEIGHT, 12]} />
+        <meshStandardMaterial color="#d1fae5" emissive="#7dd3a8" emissiveIntensity={0.15} />
       </mesh>
-      <Html distanceFactor={9} position={[0, 0.3, 0]}>
+      {/* Flag head at the top of the pole. */}
+      <mesh position={[0, POLE_HEIGHT, 0]}>
+        <sphereGeometry args={[0.12, 20, 20]} />
+        <meshStandardMaterial color={selected ? "#facc15" : "#7dd3a8"} emissive="#7dd3a8" emissiveIntensity={0.4} />
+      </mesh>
+      <Html distanceFactor={9} position={[0, POLE_HEIGHT + 0.25, 0]}>
         <button
           type="button"
           onClick={() => onSelectPlant(plant.id)}

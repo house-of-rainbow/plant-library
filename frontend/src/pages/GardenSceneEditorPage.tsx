@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { useNavigate, useParams } from "react-router-dom";
@@ -23,6 +23,7 @@ export default function GardenSceneEditorPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null);
+  const hasAutoSelected = useRef(false);
 
   useEffect(() => {
     if (garden && garden.id !== activeGarden?.id) {
@@ -59,13 +60,20 @@ export default function GardenSceneEditorPage() {
       setSelectedPlantId(null);
       return;
     }
-
-    if (selectedPlantId && orderedPlants.some((plant) => plant.id === selectedPlantId)) {
+// Drop the selection if the selected plant no longer exists.
+    if (selectedPlantId && !orderedPlants.some((plant) => plant.id === selectedPlantId)) {
+      setSelectedPlantId(null);
       return;
     }
 
-    const next = orderedPlants.find((plant) => !plant.position_3d) ?? orderedPlants[0];
-    setSelectedPlantId(next.id);
+    // Auto-select a plant once on first load for convenience. After that,
+    // selection (including deselecting) is fully user-controlled so clicking
+    // the map only moves a plant when one is intentionally selected.
+    if (!hasAutoSelected.current && !selectedPlantId) {
+      const next = orderedPlants.find((plant) => !plant.position_3d) ?? orderedPlants[0];
+      setSelectedPlantId(next.id);
+      hasAutoSelected.current = true;
+    }
   }, [orderedPlants, selectedPlantId]);
 
   const selectedPlant = orderedPlants.find((plant) => plant.id === selectedPlantId) ?? null;
@@ -163,10 +171,19 @@ export default function GardenSceneEditorPage() {
                 <p className="text-sm text-white/50">
                   {selectedPlant
                     ? `Selected plant: ${selectedPlant.nickname || selectedPlant.plant_class?.common_name || "Plant"}`
-                    : "Select a plant from the list to place it."}
+                    : "No plant selected — clicking the map won't move anything."}
                 </p>
               </div>
               {savePosition.isPending && <span className="text-xs text-canopy-300">Saving position…</span>}
+              {selectedPlant && (
+                <button
+                  type="button"
+                  className="btn-ghost text-xs"
+                  onClick={() => setSelectedPlantId(null)}
+                >
+                  Deselect
+                </button>
+              )}
             </div>
 
             <GardenSceneEditor
@@ -284,7 +301,7 @@ export default function GardenSceneEditorPage() {
                   >
                     <button
                       type="button"
-                      onClick={() => setSelectedPlantId(plant.id)}
+                      onClick={() => setSelectedPlantId(selected ? null : plant.id)}
                       className="w-full text-left"
                     >
                       <div className="flex items-start gap-3">
@@ -312,7 +329,9 @@ export default function GardenSceneEditorPage() {
                     </button>
 
                     <div className="mt-3 flex items-center justify-between gap-3 text-xs">
-                      <span className="text-white/45">Click the scene to update this pin.</span>
+                      <span className="text-white/45">
+                        {selected ? "Click the scene to place. Click again to deselect." : "Select to place its pin."}
+                      </span>
                       {plant.position_3d && (
                         <button
                           type="button"
