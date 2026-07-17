@@ -52,6 +52,18 @@ export interface CareDefaults {
   care_notes?: string | null;
 }
 
+export interface Position3D {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface GardenScene {
+  model_url: string;
+  model_filename?: string | null;
+  source: string;
+}
+
 export interface PlantClass {
   id: string;
   property_id: string;
@@ -60,6 +72,7 @@ export interface PlantClass {
   family?: string | null;
   genus?: string | null;
   description?: string | null;
+  reference_urls: string[];
   tags: string[];
   care_defaults: CareDefaults;
   hero_image_url?: string | null;
@@ -93,6 +106,7 @@ export interface PlantInstance {
   garden_id: string;
   nickname?: string | null;
   location?: string | null;
+  position_3d?: Position3D | null;
   acquisition_date?: string | null;
   pot_size?: string | null;
   soil_type?: string | null;
@@ -134,6 +148,7 @@ export interface Garden {
   property_id: string;
   name: string;
   description?: string | null;
+  scene?: GardenScene | null;
   is_home: boolean;
   created_at: string;
   updated_at: string;

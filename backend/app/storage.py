@@ -7,6 +7,7 @@ frontend can render images directly from the returned URLs.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import secrets
 from typing import Optional
 
@@ -22,6 +23,12 @@ _ALLOWED_CONTENT_TYPES = {
     "image/png": "png",
     "image/webp": "webp",
     "image/gif": "gif",
+}
+
+_ALLOWED_SCENE_EXTENSIONS = {"glb"}
+_ALLOWED_SCENE_CONTENT_TYPES = {
+    "application/octet-stream",
+    "model/gltf-binary",
 }
 
 
@@ -68,6 +75,35 @@ class BlobStorage:
             name=blob_name,
             data=data,
             content_settings=ContentSettings(content_type=content_type),
+            overwrite=True,
+        )
+
+        base = self._settings.azure_storage_public_base_url.rstrip("/")
+        container_name = self._settings.azure_storage_container
+        return f"{base}/{container_name}/{blob_name}"
+
+    async def upload_garden_scene(
+        self, data: bytes, content_type: str, filename: str | None
+    ) -> str:
+        if self._service is None or self._settings is None:
+            raise RuntimeError("Blob storage is not configured")
+
+        ext = Path(filename or "scene.glb").suffix.lower().lstrip(".")
+        if ext not in _ALLOWED_SCENE_EXTENSIONS:
+            raise ValueError("Unsupported scene file type; expected a .glb export")
+        if content_type and content_type not in _ALLOWED_SCENE_CONTENT_TYPES:
+            raise ValueError("Unsupported scene content type; expected a GLB upload")
+
+        blob_name = f"garden-scenes/{secrets.token_hex(12)}.{ext}"
+        container = self._service.get_container_client(
+            self._settings.azure_storage_container
+        )
+        from azure.storage.blob import ContentSettings
+
+        await container.upload_blob(
+            name=blob_name,
+            data=data,
+            content_settings=ContentSettings(content_type="model/gltf-binary"),
             overwrite=True,
         )
 

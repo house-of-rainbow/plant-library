@@ -6,13 +6,14 @@ plants (and tags) only.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from ..auth import CurrentUser, get_current_user
 from ..deps import authorize, tenancy_repo
 from ..models import (
     Garden,
     GardenCreate,
+    GardenScene,
     GardenUpdate,
     MemberInvite,
     MemberRole,
@@ -24,8 +25,11 @@ from ..models import (
     PropertyUpdate,
 )
 from ..repositories import TenancyRepository
+from ..storage import BlobStorage, get_storage
 
 router = APIRouter(prefix="/api/properties", tags=["properties"])
+
+_MAX_SCENE_BYTES = 100 * 1024 * 1024
 
 
 async def _to_read(
@@ -140,6 +144,42 @@ async def update_garden(
     updated = await tenancy.update_garden(property_id, garden_id, payload)
     if updated is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Garden not found")
+    return updated
+
+
+@router.post("/{property_id}/gardens/{garden_id}/scene", response_model=Garden)
+async def upload_garden_scene(
+    property_id: str,
+    garden_id: str,
+    file: UploadFile = File(...),
+    tenancy: TenancyRepository = Depends(tenancy_repo),
+    storage: BlobStorage = Depends(get_storage),
+    user: CurrentUser = Depends(get_current_user),
+):
+    await authorize(tenancy, property_id, user, require_owner=True)
+    garden = await tenancy.get_garden(property_id, garden_id)
+    if garden is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Garden not found")
+
+    data = await file.read()
+    if len(data) > _MAX_SCENE_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Scene file too large")
+
+    try:
+        url = await storage.upload_garden_scene(data, file.content_type or "", file.filename)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+
+    updated = await tenancy.update_garden(
+        property_id,
+        garden_id,
+        GardenUpdate(
+            scene=GardenScene(model_url=url, model_filename=file.filename or None)
+        ),
+    )
+    assert updated is not None
     return updated
 
 

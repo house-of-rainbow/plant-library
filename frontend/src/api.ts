@@ -5,12 +5,15 @@ import type {
   DashboardSummary,
   EventType,
   Garden,
+  GardenScene,
   HealthStatus,
   MemberRole,
   Membership,
   PlantClass,
   PlantInstance,
+  Position3D,
   Property,
+  SunlightLevel,
   Tag,
   TagScope,
 } from "./types";
@@ -80,11 +83,21 @@ export const gardensApi = {
   update: (
     propertyId: string,
     gardenId: string,
-    payload: { name?: string; description?: string }
+    payload: { name?: string; description?: string; scene?: GardenScene | null }
   ) =>
     http
       .patch<Garden>(`/api/properties/${propertyId}/gardens/${gardenId}`, payload)
       .then((r) => r.data),
+  uploadScene: async (propertyId: string, gardenId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const { data } = await http.post<Garden>(
+      `/api/properties/${propertyId}/gardens/${gardenId}/scene`,
+      form,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return data;
+  },
   remove: (propertyId: string, gardenId: string) =>
     http
       .delete(`/api/properties/${propertyId}/gardens/${gardenId}`)
@@ -195,6 +208,7 @@ export interface InstanceCreate {
   garden_id: string;
   nickname?: string;
   location?: string;
+  position_3d?: Position3D | null;
   acquisition_date?: string;
   pot_size?: string;
   soil_type?: string;
@@ -303,6 +317,25 @@ export interface IdentifyCandidate {
   genus?: string | null;
   family?: string | null;
   score: number;
+  description?: string | null;
+  watering_interval_days?: number | null;
+  watering_notes?: string | null;
+  sunlight?: SunlightLevel | null;
+  light_notes?: string | null;
+  fertilizing_interval_days?: number | null;
+  fertilizer_type?: string | null;
+  fertilizer_notes?: string | null;
+  repotting_interval_months?: number | null;
+  soil_type?: string | null;
+  pot_size?: string | null;
+  hardiness_zone?: string | null;
+  mature_size?: string | null;
+  pruning_notes?: string | null;
+  propagation_notes?: string | null;
+  pests_notes?: string | null;
+  toxic_to_pets?: boolean | null;
+  care_notes?: string | null;
+  reference_url?: string | null;
   gbif_id?: string | null;
   powo_id?: string | null;
   image_url?: string | null;
@@ -318,7 +351,7 @@ export interface IdentifyResponse {
   candidates: IdentifyCandidate[];
 }
 
-export type IdentifyStep = "start" | "plantnet" | "openai" | "consolidate" | "toxicity" | "complete";
+export type IdentifyStep = "start" | "plantnet" | "openai" | "consolidate" | "toxicity" | "enrich" | "complete";
 export type IdentifyStepStatus = "running" | "done" | "error" | "skipped";
 
 export interface IdentifyStreamEvent {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import { gardensApi } from "../api";
 import { useTenant } from "../tenant/TenantContext";
 import PropertyWizard from "./wizard/PropertyWizard";
@@ -16,30 +17,47 @@ export default function TenantSwitcher() {
     setGardenId,
     refresh,
   } = useTenant();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [wizard, setWizard] = useState(false);
   const [addingGarden, setAddingGarden] = useState(false);
   const [gardenName, setGardenName] = useState("");
+  const [gardenDescription, setGardenDescription] = useState("");
+  const [gardenSceneFile, setGardenSceneFile] = useState<File | null>(null);
   const [gardenError, setGardenError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const propertyId = property?.id ?? null;
 
   const createGarden = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!propertyId) {
         throw new Error("No active property selected");
       }
       return gardensApi.create(propertyId, {
         name: gardenName.trim(),
+        description: gardenDescription.trim() || undefined,
       });
     },
     onSuccess: async (created) => {
+      if (gardenSceneFile && propertyId) {
+        try {
+          await gardensApi.uploadScene(propertyId, created.id, gardenSceneFile);
+        } catch (error) {
+          const detail =
+            (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+            "Garden created, but the Polycam scene upload failed.";
+          setGardenError(detail);
+        }
+      }
+
       await refresh();
       setGardenId(created.id);
       setGardenName("");
-      setGardenError(null);
+      setGardenDescription("");
+      setGardenSceneFile(null);
       setAddingGarden(false);
       setOpen(false);
+      navigate(`/gardens/${created.id}`);
     },
     onError: (error: unknown) => {
       const detail =
@@ -153,6 +171,17 @@ export default function TenantSwitcher() {
 
             {isOwner && (
               <div className="mt-2 space-y-2">
+                {garden && (
+                  <button
+                    onClick={() => {
+                      navigate(`/gardens/${garden.id}`);
+                      setOpen(false);
+                    }}
+                    className="w-full text-left rounded-xl px-3 py-2 text-sm text-canopy-300 hover:bg-white/10"
+                  >
+                    Edit garden &amp; scene
+                  </button>
+                )}
                 {!addingGarden ? (
                   <button
                     onClick={() => {
@@ -180,6 +209,23 @@ export default function TenantSwitcher() {
                       value={gardenName}
                       onChange={(e) => setGardenName(e.target.value)}
                     />
+                    <textarea
+                      className="input min-h-[84px]"
+                      placeholder="Description (optional)"
+                      value={gardenDescription}
+                      onChange={(e) => setGardenDescription(e.target.value)}
+                    />
+                    <div className="space-y-1">
+                      <label className="block text-xs text-white/55">
+                        Optional Polycam GLB scene
+                      </label>
+                      <input
+                        type="file"
+                        accept=".glb,model/gltf-binary"
+                        className="block w-full text-xs text-white/70"
+                        onChange={(e) => setGardenSceneFile(e.target.files?.[0] ?? null)}
+                      />
+                    </div>
                     {gardenError && <p className="text-xs text-red-300">{gardenError}</p>}
                     <div className="flex gap-2">
                       <button
@@ -188,6 +234,8 @@ export default function TenantSwitcher() {
                         onClick={() => {
                           setAddingGarden(false);
                           setGardenName("");
+                          setGardenDescription("");
+                          setGardenSceneFile(null);
                           setGardenError(null);
                         }}
                       >

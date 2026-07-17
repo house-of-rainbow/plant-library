@@ -12,12 +12,13 @@ import type { PlantClass } from "../types";
 
 const MAX_PHOTOS = 5;
 
-type StepKey = "plantnet" | "openai" | "consolidate" | "toxicity";
+type StepKey = "plantnet" | "openai" | "consolidate" | "toxicity" | "enrich";
 const STEPS: { key: StepKey; label: string }[] = [
   { key: "plantnet", label: "Pl@ntNet" },
   { key: "openai", label: "GPT vision" },
   { key: "consolidate", label: "Consolidating" },
   { key: "toxicity", label: "Pet toxicity (ASPCA)" },
+  { key: "enrich", label: "Final enrichment" },
 ];
 
 type StepState = Record<StepKey, { status?: IdentifyStepStatus; count?: number }>;
@@ -224,7 +225,6 @@ export default function IdentifyModal({
     setEngineResults({ plantnet: [], openai: [] });
     setShowDetails(false);
     try {
-      await identifyApi.identifyStream(files, (e) => {
       await identifyApi.identifyStream(files, promptContext, (e) => {
         if (e.step === "complete") {
           setCandidates(e.candidates ?? []);
@@ -233,7 +233,8 @@ export default function IdentifyModal({
           e.step === "plantnet" ||
           e.step === "openai" ||
           e.step === "consolidate" ||
-          e.step === "toxicity"
+          e.step === "toxicity" ||
+          e.step === "enrich"
         ) {
           const key = e.step as StepKey;
           setSteps((prev) => ({ ...prev, [key]: { status: e.status, count: e.count } }));
@@ -264,16 +265,17 @@ export default function IdentifyModal({
       let cls = matchClass(candidate);
       if (!cls) {
         const tox = candidate.pet_toxicity;
-        const careNotes = tox && tox.matched
-          ? [
-              tox.summary,
-              tox.toxic_principles ? `Toxic principles: ${tox.toxic_principles}` : "",
-              tox.clinical_signs ? `Clinical signs: ${tox.clinical_signs}` : "",
-              tox.source_url ? `Source: ${tox.source_url}` : "",
-            ]
-              .filter(Boolean)
-              .join("\n")
-          : undefined;
+        const careNotes = [
+          candidate.care_notes,
+          tox && tox.matched ? tox.summary : "",
+          tox?.toxic_principles ? `Toxic principles: ${tox.toxic_principles}` : "",
+          tox?.clinical_signs ? `Clinical signs: ${tox.clinical_signs}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        const referenceUrls = [candidate.reference_url, tox?.source_url]
+          .filter((value): value is string => !!value)
+          .filter((value, index, list) => list.indexOf(value) === index);
         cls = await classesApi.create(propertyId, {
           common_name:
             candidate.common_name ||
@@ -283,10 +285,27 @@ export default function IdentifyModal({
             candidate.scientific_name_without_author || candidate.scientific_name,
           family: candidate.family || undefined,
           genus: candidate.genus || undefined,
+          description: candidate.description || undefined,
+          reference_urls: referenceUrls,
           hero_image_url: candidate.image_url || undefined,
           care_defaults: {
-            toxic_to_pets: tox?.toxic_to_pets ?? undefined,
-            care_notes: careNotes,
+            watering_interval_days: candidate.watering_interval_days ?? undefined,
+            watering_notes: candidate.watering_notes || undefined,
+            sunlight: candidate.sunlight || undefined,
+            light_notes: candidate.light_notes || undefined,
+            fertilizing_interval_days: candidate.fertilizing_interval_days ?? undefined,
+            fertilizer_type: candidate.fertilizer_type || undefined,
+            fertilizer_notes: candidate.fertilizer_notes || undefined,
+            repotting_interval_months: candidate.repotting_interval_months ?? undefined,
+            soil_type: candidate.soil_type || undefined,
+            pot_size: candidate.pot_size || undefined,
+            hardiness_zone: candidate.hardiness_zone || undefined,
+            mature_size: candidate.mature_size || undefined,
+            pruning_notes: candidate.pruning_notes || undefined,
+            propagation_notes: candidate.propagation_notes || undefined,
+            pests_notes: candidate.pests_notes || undefined,
+            toxic_to_pets: tox?.toxic_to_pets ?? candidate.toxic_to_pets ?? undefined,
+            care_notes: careNotes || undefined,
           },
         } as Partial<PlantClass>);
         qc.invalidateQueries({ queryKey: ["classes"] });

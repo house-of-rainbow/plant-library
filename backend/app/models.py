@@ -113,6 +113,18 @@ class HumidityRange(BaseModel):
     max_pct: Optional[int] = Field(default=None, ge=0, le=100)
 
 
+class Position3D(BaseModel):
+    x: float
+    y: float
+    z: float
+
+
+class GardenScene(BaseModel):
+    model_url: str
+    model_filename: Optional[str] = None
+    source: str = "polycam"
+
+
 class CareDefaults(BaseModel):
     """Care requirements. Used as defaults on a class and as overrides on an
     instance (every field optional so an instance overrides only what it needs).
@@ -148,6 +160,7 @@ class PlantClassBase(BaseModel):
     family: Optional[str] = None
     genus: Optional[str] = None
     description: Optional[str] = None
+    reference_urls: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     care_defaults: CareDefaults = Field(default_factory=CareDefaults)
     hero_image_url: Optional[str] = None
@@ -163,6 +176,7 @@ class PlantClassUpdate(BaseModel):
     family: Optional[str] = None
     genus: Optional[str] = None
     description: Optional[str] = None
+    reference_urls: Optional[list[str]] = None
     tags: Optional[list[str]] = None
     care_defaults: Optional[CareDefaults] = None
     hero_image_url: Optional[str] = None
@@ -204,6 +218,7 @@ class PlantInstanceBase(BaseModel):
     garden_id: str = Field(..., description="Owning Garden id")
     nickname: Optional[str] = None
     location: Optional[str] = Field(default=None, description="Room / area")
+    position_3d: Optional[Position3D] = None
     acquisition_date: Optional[date] = None
     pot_size: Optional[str] = None
     soil_type: Optional[str] = None
@@ -224,6 +239,7 @@ class PlantInstanceUpdate(BaseModel):
     garden_id: Optional[str] = None
     nickname: Optional[str] = None
     location: Optional[str] = None
+    position_3d: Optional[Position3D] = None
     acquisition_date: Optional[date] = None
     pot_size: Optional[str] = None
     soil_type: Optional[str] = None
@@ -273,6 +289,7 @@ class PlantInstanceRead(PlantInstance):
 class GardenBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     description: Optional[str] = None
+    scene: Optional[GardenScene] = None
 
 
 class GardenCreate(GardenBase):
@@ -282,6 +299,7 @@ class GardenCreate(GardenBase):
 class GardenUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=120)
     description: Optional[str] = None
+    scene: Optional[GardenScene] = None
 
 
 class Garden(GardenBase):

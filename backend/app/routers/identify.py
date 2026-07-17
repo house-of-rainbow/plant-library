@@ -19,7 +19,13 @@ from pydantic import BaseModel
 from ..auth import CurrentUser, get_current_user
 from ..aspca import lookup_pet_toxicity
 from ..config import Settings, get_settings
-from ..openai_identify import consolidate_with_openai, identify_with_openai
+from ..models import SunlightLevel
+from ..openai_identify import (
+    consolidate_with_openai,
+    enrich_candidates_with_openai,
+    identify_with_openai,
+)
+from ..wikipedia import WikipediaClient, apply_reference_metadata
 
 logger = logging.getLogger("plantlibrary.identify")
 
@@ -27,6 +33,7 @@ router = APIRouter(prefix="/api/identify", tags=["identify"])
 
 _MAX_IMAGES = 5
 _ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+_wikipedia = WikipediaClient()
 
 
 class IdentifyCandidate(BaseModel):
@@ -37,6 +44,25 @@ class IdentifyCandidate(BaseModel):
     genus: Optional[str] = None
     family: Optional[str] = None
     score: float  # confidence 0..1
+    description: Optional[str] = None
+    watering_interval_days: Optional[int] = None
+    watering_notes: Optional[str] = None
+    sunlight: Optional[SunlightLevel] = None
+    light_notes: Optional[str] = None
+    fertilizing_interval_days: Optional[int] = None
+    fertilizer_type: Optional[str] = None
+    fertilizer_notes: Optional[str] = None
+    repotting_interval_months: Optional[int] = None
+    soil_type: Optional[str] = None
+    pot_size: Optional[str] = None
+    hardiness_zone: Optional[str] = None
+    mature_size: Optional[str] = None
+    pruning_notes: Optional[str] = None
+    propagation_notes: Optional[str] = None
+    pests_notes: Optional[str] = None
+    toxic_to_pets: Optional[bool] = None
+    care_notes: Optional[str] = None
+    reference_url: Optional[str] = None
     gbif_id: Optional[str] = None
     powo_id: Optional[str] = None
     image_url: Optional[str] = None
@@ -168,6 +194,24 @@ async def _try_openai(
             genus=c.genus,
             family=c.family,
             score=max(0.0, min(1.0, c.confidence)),
+            description=c.description,
+            watering_interval_days=c.watering_interval_days,
+            watering_notes=c.watering_notes,
+            sunlight=c.sunlight,
+            light_notes=c.light_notes,
+            fertilizing_interval_days=c.fertilizing_interval_days,
+            fertilizer_type=c.fertilizer_type,
+            fertilizer_notes=c.fertilizer_notes,
+            repotting_interval_months=c.repotting_interval_months,
+            soil_type=c.soil_type,
+            pot_size=c.pot_size,
+            hardiness_zone=c.hardiness_zone,
+            mature_size=c.mature_size,
+            pruning_notes=c.pruning_notes,
+            propagation_notes=c.propagation_notes,
+            pests_notes=c.pests_notes,
+            toxic_to_pets=c.toxic_to_pets,
+            care_notes=c.care_notes,
         )
         for c in llm.candidates
     ]
@@ -255,6 +299,62 @@ def _fmt_candidates(cands: list[IdentifyCandidate]) -> str:
         f"{c.scientific_name} ({c.common_name or 'n/a'}) p={c.score:.2f}"
         for c in cands[:5]
     )
+
+
+def _enrichment_summary(cands: list[IdentifyCandidate]) -> str:
+    if not cands:
+        return "none"
+    return json.dumps(
+        [
+            {
+                "scientific_name": c.scientific_name,
+                "common_name": c.common_name,
+                "family": c.family,
+                "genus": c.genus,
+                "confidence": c.score,
+                "agreed_by_both": c.agreed_by_both,
+                "note": c.note,
+            }
+            for c in cands[:5]
+        ]
+    )
+
+
+def _apply_enrichment(
+    candidates: list[IdentifyCandidate],
+    enriched: list,
+) -> None:
+    by_name = {
+        (c.scientific_name_without_author or c.scientific_name or "").lower(): c
+        for c in candidates
+    }
+    for item in enriched:
+        key = (item.scientific_name or "").lower()
+        target = by_name.get(key)
+        if target is None:
+            continue
+        target.common_name = item.common_name or target.common_name
+        target.family = item.family or target.family
+        target.genus = item.genus or target.genus
+        target.score = max(0.0, min(1.0, item.confidence))
+        target.description = item.description or target.description
+        target.watering_interval_days = item.watering_interval_days
+        target.watering_notes = item.watering_notes
+        target.sunlight = item.sunlight
+        target.light_notes = item.light_notes
+        target.fertilizing_interval_days = item.fertilizing_interval_days
+        target.fertilizer_type = item.fertilizer_type
+        target.fertilizer_notes = item.fertilizer_notes
+        target.repotting_interval_months = item.repotting_interval_months
+        target.soil_type = item.soil_type
+        target.pot_size = item.pot_size
+        target.hardiness_zone = item.hardiness_zone
+        target.mature_size = item.mature_size
+        target.pruning_notes = item.pruning_notes
+        target.propagation_notes = item.propagation_notes
+        target.pests_notes = item.pests_notes
+        target.toxic_to_pets = item.toxic_to_pets
+        target.care_notes = item.care_notes
 
 
 @router.post("/stream")
@@ -412,6 +512,32 @@ async def identify_stream(
                 yield line({"step": "toxicity", "status": "error"})
         else:
             yield line({"step": "toxicity", "status": "skipped"})
+
+        if final and has_ai:
+            yield line({"step": "enrich", "status": "running"})
+            aspca_context = (
+                json.dumps(final[0].pet_toxicity)
+                if final and final[0].pet_toxicity is not None
+                else None
+            )
+            try:
+                enriched, references = await enrich_candidates_with_openai(
+                    [(data, ct) for _, data, ct in raw],
+                    _enrichment_summary(final),
+                    aspca_context,
+                    api_key=settings.openai_api_key,
+                    model=settings.openai_model,
+                    wikipedia_client=_wikipedia,
+                    prompt_context=prompt_context,
+                )
+                _apply_enrichment(final, enriched.candidates)
+                _apply_reference_metadata(final, references)
+                yield line({"step": "enrich", "status": "done"})
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Final enrichment failed: %s", exc)
+                yield line({"step": "enrich", "status": "error"})
+        else:
+            yield line({"step": "enrich", "status": "skipped"})
 
         yield line(
             {
