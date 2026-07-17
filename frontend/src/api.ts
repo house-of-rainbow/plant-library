@@ -50,6 +50,16 @@ export async function authHeaders(): Promise<Record<string, string>> {
 
 export const apiBaseUrl = baseURL;
 
+export interface PersonalAccessTokenCreated {
+  id: string;
+  name?: string | null;
+  last_four: string;
+  expires_at: string;
+  last_used_at?: string | null;
+  created_at: string;
+  token: string;
+}
+
 // ---- Properties / Gardens / Members (tenancy) ----
 export interface PropertyCreate {
   name: string;
@@ -126,6 +136,16 @@ export const membersApi = {
     http
       .delete(`/api/properties/${propertyId}/members/${memberId}`)
       .then((r) => r.data),
+};
+
+export const patsApi = {
+  list: () => http.get<string[]>("/api/auth/pats").then((r) => r.data),
+  create: () =>
+    http
+      .post<PersonalAccessTokenCreated>("/api/auth/pats", {})
+      .then((r) => r.data),
+  remove: (tokenId: string) =>
+    http.delete(`/api/auth/pats/${tokenId}`).then((r) => r.data),
 };
 
 // ---- Tags ----

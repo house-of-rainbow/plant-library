@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useMsal } from "@azure/msal-react";
 import { AnimatePresence, motion } from "framer-motion";
+import { Link } from "react-router-dom";
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -72,6 +73,13 @@ export default function AccountMenu() {
               </div>
             </div>
             <div className="my-2 h-px bg-white/10" />
+            <Link
+              to="/tokens"
+              onClick={() => setOpen(false)}
+              className="block w-full text-left rounded-xl px-3 py-2 text-sm text-white/80 hover:bg-white/10 transition-colors"
+            >
+              Key Personal Access Tokens
+            </Link>
             <button
               onClick={signOut}
               className="w-full text-left rounded-xl px-3 py-2 text-sm text-white/80 hover:bg-white/10 transition-colors"

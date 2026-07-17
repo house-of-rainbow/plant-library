@@ -8,31 +8,19 @@ from ..deps import pat_repo
 from ..models import (
     PersonalAccessTokenCreate,
     PersonalAccessTokenCreated,
-    PersonalAccessTokenRead,
 )
 from ..repositories import PersonalAccessTokenRepository
 
 router = APIRouter(prefix="/api/auth/pats", tags=["personal-access-tokens"])
 
 
-def _to_read(token_id: str, token) -> PersonalAccessTokenRead:
-    return PersonalAccessTokenRead(
-        id=token_id,
-        name=token.name,
-        last_four=token.last_four,
-        expires_at=token.expires_at,
-        last_used_at=token.last_used_at,
-        created_at=token.created_at,
-    )
-
-
-@router.get("", response_model=list[PersonalAccessTokenRead])
+@router.get("", response_model=list[str])
 async def list_personal_access_tokens(
     repo: PersonalAccessTokenRepository = Depends(pat_repo),
     user: CurrentUser = Depends(get_current_user),
 ):
     tokens = await repo.list_for_user(user.oid)
-    return [_to_read(token.id, token) for token in tokens]
+    return [token.id for token in tokens]
 
 
 @router.post(

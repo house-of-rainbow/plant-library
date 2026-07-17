@@ -9,6 +9,7 @@ import ScanPage from "./pages/ScanPage";
 import MembersPage from "./pages/MembersPage";
 import TagsPage from "./pages/TagsPage";
 import GardenSceneEditorPage from "./pages/GardenSceneEditorPage";
+import AccessTokensPage from "./pages/AccessTokensPage";
 import PropertyWizard from "./components/wizard/PropertyWizard";
 import { useTenant } from "./tenant/TenantContext";
 
@@ -50,6 +51,7 @@ export default function App() {
         <Route path="/plants/:id" element={<PlantDetailPage />} />
         <Route path="/groups" element={<TagsPage />} />
         <Route path="/members" element={<MembersPage />} />
+        <Route path="/tokens" element={<AccessTokensPage />} />
         <Route path="/ops" element={<OperationsPage />} />
         <Route path="/gardens/:id" element={<GardenSceneEditorPage />} />
         <Route path="/scan/:plantId" element={<ScanPage />} />
