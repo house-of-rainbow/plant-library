@@ -7,6 +7,9 @@ document types (``property``, ``garden``, ``membership``, ``tag``) by a
 """
 from __future__ import annotations
 
+import hashlib
+import secrets
+from datetime import timedelta
 from datetime import datetime, timezone
 
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
@@ -24,9 +27,11 @@ from .models import (
     PlantInstance,
     PlantInstanceCreate,
     PlantInstanceUpdate,
+    PersonalAccessToken,
     Property,
     PropertyCreate,
     PropertyUpdate,
+    PersonalAccessTokenCreate,
     Tag,
     TagCreate,
     TagScope,
@@ -38,6 +43,28 @@ from .models import (
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+_PAT_PREFIX = "plpat_"
+_PAT_TTL = timedelta(days=365)
+_PAT_LAST_USED_WRITE_INTERVAL = timedelta(minutes=5)
+
+
+def _build_pat_value(token_id: str, secret: str) -> str:
+    return f"{_PAT_PREFIX}{token_id}.{secret}"
+
+
+def _hash_pat(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _parse_pat(token: str) -> tuple[str, str] | None:
+    if not token.startswith(_PAT_PREFIX):
+        return None
+    token_id, separator, secret = token[len(_PAT_PREFIX) :].partition(".")
+    if not token_id or separator != "." or not secret:
+        return None
+    return token_id, secret
 
 
 # --------------------------------------------------------------------------- #
@@ -287,6 +314,92 @@ class TenancyRepository:
             return False
         return True
 
+
+class PersonalAccessTokenRepository:
+    def __init__(self, db: Database) -> None:
+        self._c = db.auth
+
+    async def create(
+        self,
+        user_oid: str,
+        user_email: str | None,
+        user_name: str | None,
+        payload: PersonalAccessTokenCreate,
+    ) -> tuple[PersonalAccessToken, str]:
+        secret = secrets.token_urlsafe(32)
+        entity = PersonalAccessToken(
+            user_oid=user_oid,
+            user_email=(_norm_email(user_email) if user_email else None),
+            user_name=user_name,
+            name=payload.name,
+            token_hash="",
+            last_four=secret[-4:],
+            expires_at=_now() + _PAT_TTL,
+        )
+        token = _build_pat_value(entity.id, secret)
+        entity.token_hash = _hash_pat(token)
+        await self._c.create_item(body=entity.model_dump(mode="json"))
+        return entity, token
+
+    async def list_for_user(self, user_oid: str) -> list[PersonalAccessToken]:
+        query = (
+            "SELECT * FROM c WHERE c.doc_type = 'personal_access_token' "
+            "AND c.user_oid = @oid ORDER BY c.created_at DESC"
+        )
+        params = [{"name": "@oid", "value": user_oid}]
+        return [
+            PersonalAccessToken(**i)
+            async for i in self._c.query_items(query=query, parameters=params)
+        ]
+
+    async def get_for_user(
+        self, user_oid: str, token_id: str
+    ) -> PersonalAccessToken | None:
+        try:
+            item = await self._c.read_item(item=token_id, partition_key=token_id)
+        except CosmosResourceNotFoundError:
+            return None
+        if item.get("doc_type") != "personal_access_token":
+            return None
+        token = PersonalAccessToken(**item)
+        if token.user_oid != user_oid:
+            return None
+        return token
+
+    async def revoke(self, user_oid: str, token_id: str) -> bool:
+        current = await self.get_for_user(user_oid, token_id)
+        if current is None:
+            return False
+        await self._c.delete_item(item=token_id, partition_key=token_id)
+        return True
+
+    async def authenticate(self, token: str) -> PersonalAccessToken | None:
+        parsed = _parse_pat(token)
+        if parsed is None:
+            return None
+        token_id, _secret = parsed
+        try:
+            item = await self._c.read_item(item=token_id, partition_key=token_id)
+        except CosmosResourceNotFoundError:
+            return None
+        if item.get("doc_type") != "personal_access_token":
+            return None
+
+        entity = PersonalAccessToken(**item)
+        if entity.expires_at <= _now():
+            return None
+        if not secrets.compare_digest(entity.token_hash, _hash_pat(token)):
+            return None
+        if (
+            entity.last_used_at is None
+            or (_now() - entity.last_used_at) >= _PAT_LAST_USED_WRITE_INTERVAL
+        ):
+            entity.last_used_at = _now()
+            entity.updated_at = entity.last_used_at
+            await self._c.replace_item(
+                item=entity.id, body=entity.model_dump(mode="json")
+            )
+        return entity
 
 # --------------------------------------------------------------------------- #
 # Tags

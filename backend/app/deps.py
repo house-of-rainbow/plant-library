@@ -7,6 +7,7 @@ from .auth import CurrentUser
 from .db import get_db
 from .models import MemberRole, Membership
 from .repositories import (
+    PersonalAccessTokenRepository,
     PlantClassRepository,
     PlantInstanceRepository,
     TagRepository,
@@ -28,6 +29,10 @@ def tenancy_repo() -> TenancyRepository:
 
 def tag_repo() -> TagRepository:
     return TagRepository(get_db())
+
+
+def pat_repo() -> PersonalAccessTokenRepository:
+    return PersonalAccessTokenRepository(get_db())
 
 
 async def authorize(

@@ -96,6 +96,10 @@ def new_tag_id() -> str:
     return f"tag_{secrets.token_hex(6)}"
 
 
+def new_personal_access_token_id() -> str:
+    return f"pat_{secrets.token_hex(8)}"
+
+
 def _norm_email(email: str) -> str:
     return email.strip().lower()
 
@@ -358,6 +362,38 @@ class MemberInvite(BaseModel):
 
 class MemberRoleUpdate(BaseModel):
     role: MemberRole
+
+
+class PersonalAccessTokenCreate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=120)
+
+
+class PersonalAccessToken(BaseModel):
+    id: str = Field(default_factory=new_personal_access_token_id)
+    doc_type: str = "personal_access_token"
+    user_oid: str
+    user_email: Optional[str] = None
+    user_name: Optional[str] = None
+    name: Optional[str] = None
+    token_hash: str
+    last_four: str
+    expires_at: datetime
+    last_used_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class PersonalAccessTokenRead(BaseModel):
+    id: str
+    name: Optional[str] = None
+    last_four: str
+    expires_at: datetime
+    last_used_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class PersonalAccessTokenCreated(PersonalAccessTokenRead):
+    token: str
 
 
 class TagBase(BaseModel):

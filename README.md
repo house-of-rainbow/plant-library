@@ -19,7 +19,7 @@ Two experiences, one app:
 | Backend   | Python FastAPI (async), Pydantic v2 |
 | Database  | Azure Cosmos DB (NoSQL API) |
 | Images    | Azure Blob Storage (Azurite locally) |
-| Auth      | Microsoft EntraID (single-tenant; stubbed for local dev) |
+| Auth      | Microsoft EntraID for interactive sign-in, personal access tokens for API/MCP |
 | Hosting   | Azure Container Apps (deployment not yet implemented) |
 
 Secrets are **only** read from environment variables. Nothing is hard-coded.
@@ -90,6 +90,24 @@ Key backend variables:
 - `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER`, `AZURE_STORAGE_PUBLIC_BASE_URL`
 - `AUTH_DISABLED`, `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_API_AUDIENCE`
 - `SCAN_BASE_URL`
+
+## Personal access tokens
+
+Users can mint long-lived personal access tokens from the API. Each token:
+
+- lasts 365 days
+- is shown only once at creation time
+- is stored server-side as a hash only
+- inherits the same property and garden access as the owning user
+
+Use the current user's bearer token to manage PATs:
+
+- `GET /api/auth/pats`
+- `POST /api/auth/pats`
+- `DELETE /api/auth/pats/{token_id}`
+
+The MCP server now authenticates with these PATs as well, so `list_properties`
+and every property-scoped MCP tool only return data the token's user can access.
 
 ## API overview
 

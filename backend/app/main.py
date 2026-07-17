@@ -15,6 +15,7 @@ from .routers import (
     identify,
     images,
     instances,
+    pats,
     properties,
     scan,
     tags,
@@ -55,6 +56,7 @@ app.include_router(images.router)
 app.include_router(dashboard.router)
 app.include_router(identify.router)
 app.include_router(properties.router)
+app.include_router(pats.router)
 app.include_router(tags.router)
 
 

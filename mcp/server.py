@@ -1,9 +1,8 @@
 """Burien Station Plant Library — MCP server (FastMCP).
 
-Exposes the library's operations as MCP tools. Authentication is via API key:
-a bearer token that must be one of the GUIDs listed in the ``MCP_API_KEYS``
-environment variable (comma-separated). This is separate from the web app's
-EntraID auth.
+Exposes the library's operations as MCP tools. Authentication is via the same
+personal access tokens used by the REST API, so MCP responses are scoped to the
+authenticated user's memberships.
 
 Reuses the backend's data layer (``app.*``) so behaviour matches the REST API.
 """
@@ -14,11 +13,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastmcp import FastMCP
-from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
+from fastmcp.server.auth import AccessToken, TokenVerifier
+from fastmcp.server.dependencies import get_access_token
 
+from app.auth import CurrentUser
 from app.care import compute_care_status
 from app.config import get_settings
 from app.db import get_db
+from app.models import MemberRole
 from app.models import (
     CareEvent,
     CareEventCreate,
@@ -31,6 +33,7 @@ from app.models import (
     PlantInstanceUpdate,
 )
 from app.repositories import (
+    PersonalAccessTokenRepository,
     PlantClassRepository,
     PlantInstanceRepository,
     TenancyRepository,
@@ -42,15 +45,25 @@ logger = logging.getLogger("plantlibrary.mcp")
 settings = get_settings()
 
 
-def _build_verifier() -> StaticTokenVerifier:
-    """Every GUID in MCP_API_KEYS is accepted as a valid bearer token."""
-    tokens = {
-        key: {"client_id": "mcp-client", "scopes": []}
-        for key in settings.mcp_api_keys_list
-    }
-    if not tokens:
-        logger.warning("MCP_API_KEYS is empty — all requests will be rejected.")
-    return StaticTokenVerifier(tokens=tokens)
+class PersonalAccessTokenVerifier(TokenVerifier):
+    async def verify_token(self, token: str) -> AccessToken | None:
+        pat = await PersonalAccessTokenRepository(get_db()).authenticate(token)
+        if pat is None:
+            return None
+        claims = {
+            "oid": pat.user_oid,
+            "sub": pat.user_oid,
+            "name": pat.user_name or pat.user_email or "Personal Access Token",
+            "email": pat.user_email,
+            "pat_id": pat.id,
+        }
+        return AccessToken(
+            token=token,
+            client_id=pat.user_oid,
+            scopes=[],
+            expires_at=pat.expires_at.timestamp(),
+            claims=claims,
+        )
 
 
 @asynccontextmanager
@@ -70,7 +83,7 @@ mcp = FastMCP(
         "individual plants (instances), care logging, label scanning and a care "
         "dashboard."
     ),
-    auth=_build_verifier(),
+    auth=PersonalAccessTokenVerifier(),
     lifespan=lifespan,
 )
 
@@ -85,6 +98,33 @@ def _instances() -> PlantInstanceRepository:
 
 def _tenancy() -> TenancyRepository:
     return TenancyRepository(get_db())
+
+
+def _current_user() -> CurrentUser:
+    access_token = get_access_token()
+    if access_token is None:
+        raise PermissionError("Missing bearer token")
+    claims = access_token.claims or {}
+    return CurrentUser(
+        oid=claims.get("oid") or claims.get("sub") or access_token.client_id,
+        name=claims.get("name") or "Unknown",
+        email=claims.get("email"),
+    )
+
+
+async def _authorize_property(
+    property_id: str, *, require_owner: bool = False
+):
+    user = _current_user()
+    prop = await _tenancy().get_property(property_id)
+    if prop is None:
+        raise ValueError("Property not found")
+    membership = await _tenancy().get_membership(property_id, user.oid, user.email)
+    if membership is None:
+        raise PermissionError("You do not have access to this property")
+    if require_owner and membership.role != MemberRole.owner:
+        raise PermissionError("Only the property owner can perform this action")
+    return membership
 
 
 async def _read_instance(instance: PlantInstance) -> dict:
@@ -103,12 +143,15 @@ async def _read_instance(instance: PlantInstance) -> dict:
 @mcp.tool
 async def list_properties() -> list[dict]:
     """List all properties (tenants). Use a property's id to scope other tools."""
-    return [p.model_dump(mode="json") for p in await _tenancy().list_all_properties()]
+    user = _current_user()
+    pairs = await _tenancy().list_properties_for_user(user.oid, user.email)
+    return [p.model_dump(mode="json") for p, _role in pairs]
 
 
 @mcp.tool
 async def list_gardens(property_id: str) -> list[dict]:
     """List the gardens belonging to a property."""
+    await _authorize_property(property_id)
     return [g.model_dump(mode="json") for g in await _tenancy().list_gardens(property_id)]
 
 
@@ -118,12 +161,14 @@ async def list_gardens(property_id: str) -> list[dict]:
 @mcp.tool
 async def list_plant_species(property_id: str) -> list[dict]:
     """List all plant species (care templates) in a property's library."""
+    await _authorize_property(property_id)
     return [c.model_dump(mode="json") for c in await _classes().list(property_id)]
 
 
 @mcp.tool
 async def get_plant_species(property_id: str, class_id: str) -> dict | None:
     """Get a single plant species by id."""
+    await _authorize_property(property_id)
     c = await _classes().get(property_id, class_id)
     return c.model_dump(mode="json") if c else None
 
@@ -131,6 +176,7 @@ async def get_plant_species(property_id: str, class_id: str) -> dict | None:
 @mcp.tool
 async def create_plant_species(property_id: str, species: PlantClassCreate) -> dict:
     """Create a new plant species (with optional default care requirements)."""
+    await _authorize_property(property_id)
     created = await _classes().create(property_id, species)
     return created.model_dump(mode="json")
 
@@ -140,6 +186,7 @@ async def update_plant_species(
     property_id: str, class_id: str, changes: PlantClassUpdate
 ) -> dict | None:
     """Update fields on an existing plant species."""
+    await _authorize_property(property_id)
     updated = await _classes().update(property_id, class_id, changes)
     return updated.model_dump(mode="json") if updated else None
 
@@ -147,6 +194,7 @@ async def update_plant_species(
 @mcp.tool
 async def delete_plant_species(property_id: str, class_id: str) -> dict:
     """Delete a plant species by id."""
+    await _authorize_property(property_id)
     ok = await _classes().delete(property_id, class_id)
     return {"deleted": ok, "id": class_id}
 
@@ -160,6 +208,7 @@ async def list_plants(
 ) -> list[dict]:
     """List owned plants in a property, optionally filtered by garden or species
     (class_id). Includes computed care status (watering due/overdue) for each."""
+    await _authorize_property(property_id)
     instances = await _instances().list(
         property_id, garden_id=garden_id, class_id=class_id
     )
@@ -169,6 +218,7 @@ async def list_plants(
 @mcp.tool
 async def get_plant(property_id: str, instance_id: str) -> dict | None:
     """Get a single plant with its enriched care status and species info."""
+    await _authorize_property(property_id)
     inst = await _instances().get(property_id, instance_id)
     return await _read_instance(inst) if inst else None
 
@@ -177,6 +227,7 @@ async def get_plant(property_id: str, instance_id: str) -> dict | None:
 async def create_plant(property_id: str, plant: PlantInstanceCreate) -> dict:
     """Add a new plant instance. The referenced species (class_id) and garden
     (garden_id) must exist in the property."""
+    await _authorize_property(property_id)
     if await _classes().get(property_id, plant.class_id) is None:
         raise ValueError(f"Referenced species '{plant.class_id}' does not exist")
     if await _tenancy().get_garden(property_id, plant.garden_id) is None:
@@ -190,6 +241,7 @@ async def update_plant(
     property_id: str, instance_id: str, changes: PlantInstanceUpdate
 ) -> dict | None:
     """Update fields on an existing plant instance."""
+    await _authorize_property(property_id)
     updated = await _instances().update(property_id, instance_id, changes)
     return await _read_instance(updated) if updated else None
 
@@ -197,6 +249,7 @@ async def update_plant(
 @mcp.tool
 async def delete_plant(property_id: str, instance_id: str) -> dict:
     """Delete a plant instance by id."""
+    await _authorize_property(property_id)
     ok = await _instances().delete(property_id, instance_id)
     return {"deleted": ok, "id": instance_id}
 
@@ -207,6 +260,7 @@ async def log_care_event(
 ) -> dict | None:
     """Log a care event (watered, fertilized, repotted, pruned, pest treatment,
     note, health change, moved) for a plant and update its convenience dates."""
+    await _authorize_property(property_id)
     instance = await _instances().get(property_id, instance_id)
     if instance is None:
         return None
@@ -235,6 +289,8 @@ async def log_care_event(
 async def resolve_scan(plant_id: str) -> dict | None:
     """Resolve a scanned QR/NFC label id (e.g. plant_ab12cd34) to a plant."""
     inst = await _instances().get_any(plant_id)
+    if inst is not None:
+        await _authorize_property(inst.property_id)
     return await _read_instance(inst) if inst else None
 
 
@@ -242,6 +298,7 @@ async def resolve_scan(plant_id: str) -> dict | None:
 async def care_dashboard(property_id: str, garden_id: str | None = None) -> dict:
     """Summarise a property's collection: totals plus plants that are overdue for
     water, due soon, or need attention."""
+    await _authorize_property(property_id)
     all_classes = await _classes().list(property_id)
     class_map = {c.id: c for c in all_classes}
     instances = await _instances().list(property_id, garden_id=garden_id)

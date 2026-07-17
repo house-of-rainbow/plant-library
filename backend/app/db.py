@@ -25,6 +25,7 @@ class Database:
         self.classes = None
         self.instances = None
         self.tenancy = None
+        self.auth = None
 
     async def connect(self, settings: Settings | None = None) -> None:
         settings = settings or get_settings()
@@ -52,6 +53,12 @@ class Database:
         self.tenancy = await db.create_container_if_not_exists(
             id=settings.cosmos_tenancy_container,
             partition_key=PartitionKey(path="/property_id"),
+        )
+        # Personal access tokens are looked up by token id on every request, so
+        # the auth container is partitioned by /id for direct reads.
+        self.auth = await db.create_container_if_not_exists(
+            id=settings.cosmos_auth_container,
+            partition_key=PartitionKey(path="/id"),
         )
         logger.info("Connected to Cosmos DB database '%s'", settings.cosmos_database)
 

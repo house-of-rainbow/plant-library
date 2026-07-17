@@ -18,6 +18,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 
 from .config import Settings, get_settings
+from .db import get_db
+from .repositories import PersonalAccessTokenRepository
 
 logger = logging.getLogger("plantlibrary.auth")
 
@@ -62,6 +64,10 @@ async def get_current_user(
         )
 
     token = credentials.credentials
+    pat_user = await _get_pat_user(token)
+    if pat_user is not None:
+        return pat_user
+
     try:
         signing_key = _jwks_client(settings.entra_tenant_id).get_signing_key_from_jwt(
             token
@@ -85,4 +91,15 @@ async def get_current_user(
         oid=claims.get("oid", claims.get("sub", "unknown")),
         name=claims.get("name", "Unknown"),
         email=claims.get("preferred_username") or claims.get("email"),
+    )
+
+
+async def _get_pat_user(token: str) -> CurrentUser | None:
+    pat = await PersonalAccessTokenRepository(get_db()).authenticate(token)
+    if pat is None:
+        return None
+    return CurrentUser(
+        oid=pat.user_oid,
+        name=pat.user_name or pat.user_email or "Personal Access Token",
+        email=pat.user_email,
     )
