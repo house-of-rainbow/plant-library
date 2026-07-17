@@ -7,6 +7,7 @@ plants (and tags) only.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import Response
 
 from ..auth import CurrentUser, get_current_user
 from ..deps import authorize, tenancy_repo
@@ -181,6 +182,33 @@ async def upload_garden_scene(
     )
     assert updated is not None
     return updated
+
+
+@router.get("/{property_id}/gardens/{garden_id}/scene")
+async def get_garden_scene(
+    property_id: str,
+    garden_id: str,
+    tenancy: TenancyRepository = Depends(tenancy_repo),
+    storage: BlobStorage = Depends(get_storage),
+    user: CurrentUser = Depends(get_current_user),
+):
+    await authorize(tenancy, property_id, user)
+    garden = await tenancy.get_garden(property_id, garden_id)
+    if garden is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Garden not found")
+    if garden.scene is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Garden has no scene file")
+
+    try:
+        data, content_type = await storage.download_garden_scene(garden.scene.model_url)
+    except FileNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+
+    return Response(content=data, media_type=content_type)
 
 
 @router.delete(

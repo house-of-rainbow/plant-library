@@ -76,6 +76,8 @@ export const propertiesApi = {
 export const gardensApi = {
   list: (propertyId: string) =>
     http.get<Garden[]>(`/api/properties/${propertyId}/gardens`).then((r) => r.data),
+  sceneUrl: (propertyId: string, gardenId: string) =>
+    `${apiBaseUrl}/api/properties/${propertyId}/gardens/${gardenId}/scene`,
   create: (propertyId: string, payload: GardenCreate) =>
     http
       .post<Garden>(`/api/properties/${propertyId}/gardens`, payload)

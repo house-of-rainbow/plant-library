@@ -217,11 +217,11 @@ export default function TenantSwitcher() {
                     />
                     <div className="space-y-1">
                       <label className="block text-xs text-white/55">
-                        Optional Polycam GLB scene
+                        Optional Polycam scene file
                       </label>
                       <input
                         type="file"
-                        accept=".glb,model/gltf-binary"
+                        accept=".glb,.fbx,.obj,.stl,.dae"
                         className="block w-full text-xs text-white/70"
                         onChange={(e) => setGardenSceneFile(e.target.files?.[0] ?? null)}
                       />

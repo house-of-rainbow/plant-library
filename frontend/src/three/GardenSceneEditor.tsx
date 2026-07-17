@@ -1,11 +1,18 @@
 import { Suspense, useMemo } from "react";
-import { Canvas, type ThreeEvent } from "@react-three/fiber";
+import { Canvas, type ThreeEvent, useLoader } from "@react-three/fiber";
 import { Html, OrbitControls, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
+import { ColladaLoader } from "three/examples/jsm/loaders/ColladaLoader.js";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import type { PlantInstance, Position3D } from "../types";
+
+const FALLBACK_SCENE_COLOR = new THREE.Color("#8bb99d");
 
 interface GardenSceneEditorProps {
   sceneUrl?: string | null;
+  sceneName?: string | null;
   plants: PlantInstance[];
   selectedPlantId: string | null;
   onSelectPlant: (plantId: string) => void;
@@ -38,22 +45,106 @@ function PlacementSurface({ onPlacePlant }: { onPlacePlant: (position: Position3
   );
 }
 
-function SceneModel({ url, onPlacePlant }: { url: string; onPlacePlant: (position: Position3D) => void }) {
+function getSceneScale(size: THREE.Vector3): number {
+  const maxAxis = Math.max(size.x || 0, size.y || 0, size.z || 0, 1);
+  return maxAxis > 18 ? 18 / maxAxis : 1;
+}
+
+function brightenImportedObject(object: THREE.Object3D) {
+  object.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) {
+      return;
+    }
+
+    if (!child.geometry.getAttribute("normal")) {
+      child.geometry.computeVertexNormals();
+    }
+
+    const materials = Array.isArray(child.material)
+      ? child.material
+      : child.material
+        ? [child.material]
+        : [];
+
+    for (const material of materials) {
+      if (!(material instanceof THREE.MeshStandardMaterial) &&
+          !(material instanceof THREE.MeshPhongMaterial) &&
+          !(material instanceof THREE.MeshLambertMaterial) &&
+          !(material instanceof THREE.MeshBasicMaterial)) {
+        continue;
+      }
+
+      material.vertexColors = false;
+      const hasTexture = "map" in material && !!material.map;
+      const colorLuminance = material.color.r + material.color.g + material.color.b;
+      if (hasTexture && material.map) {
+        material.map.colorSpace = THREE.SRGBColorSpace;
+        material.map.needsUpdate = true;
+        if (colorLuminance < 0.6) {
+          material.color.setRGB(1, 1, 1);
+        }
+      } else if (colorLuminance < 0.18) {
+        material.color.copy(FALLBACK_SCENE_COLOR);
+      }
+
+      if ("emissiveMap" in material && material.emissiveMap) {
+        material.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+        material.emissiveMap.needsUpdate = true;
+      }
+
+      if ("emissive" in material) {
+        material.emissive = material.emissive || new THREE.Color("#000000");
+        if (material.emissive.r + material.emissive.g + material.emissive.b < 0.12) {
+          material.emissive.copy(new THREE.Color("#163528"));
+        }
+      }
+      if ("emissiveIntensity" in material && material.emissiveIntensity !== undefined) {
+        material.emissiveIntensity = Math.max(material.emissiveIntensity ?? 0, 0.45);
+      }
+      if ("roughness" in material && material.roughness !== undefined) {
+        material.roughness = Math.min(material.roughness ?? 0.8, 0.9);
+      }
+      if ("metalness" in material && material.metalness !== undefined) {
+        material.metalness = Math.min(material.metalness ?? 0.1, 0.2);
+      }
+      material.side = THREE.DoubleSide;
+      material.needsUpdate = true;
+    }
+  });
+}
+
+function fitObject(object: THREE.Object3D) {
+  brightenImportedObject(object);
+  const box = new THREE.Box3().setFromObject(object);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  return {
+    object,
+    offset: [-center.x, -box.min.y, -center.z] as [number, number, number],
+    scale: getSceneScale(size),
+  };
+}
+
+function fitGeometry(source: THREE.BufferGeometry) {
+  const geometry = source.clone();
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox ?? new THREE.Box3();
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  geometry.translate(-center.x, -box.min.y, -center.z);
+  geometry.computeVertexNormals();
+  return {
+    geometry,
+    scale: getSceneScale(size),
+  };
+}
+
+function SceneModelGLTF({ url, onPlacePlant }: { url: string; onPlacePlant: (position: Position3D) => void }) {
   const gltf = useGLTF(url);
 
-  const { scene, offset, scale } = useMemo(() => {
+  const { object, offset, scale } = useMemo(() => {
     const scene = gltf.scene.clone(true);
-    const box = new THREE.Box3().setFromObject(scene);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxAxis = Math.max(size.x || 0, size.y || 0, size.z || 0, 1);
-    const scale = maxAxis > 18 ? 18 / maxAxis : 1;
-
-    return {
-      scene,
-      offset: [-center.x, -center.y, -center.z] as [number, number, number],
-      scale,
-    };
+    return fitObject(scene);
   }, [gltf.scene]);
 
   function handlePlace(event: ThreeEvent<PointerEvent>) {
@@ -63,9 +154,121 @@ function SceneModel({ url, onPlacePlant }: { url: string; onPlacePlant: (positio
 
   return (
     <group scale={[scale, scale, scale]} onPointerDown={handlePlace}>
-      <primitive object={scene} position={offset} />
+      <primitive object={object} position={offset} />
     </group>
   );
+}
+
+function SceneModelFBX({ url, onPlacePlant }: { url: string; onPlacePlant: (position: Position3D) => void }) {
+  const fbx = useLoader(FBXLoader, url) as THREE.Group;
+
+  const { object, offset, scale } = useMemo(() => {
+    return fitObject(fbx.clone(true));
+  }, [fbx]);
+
+  function handlePlace(event: ThreeEvent<PointerEvent>) {
+    event.stopPropagation();
+    onPlacePlant(roundPosition(event.point));
+  }
+
+  return (
+    <group scale={[scale, scale, scale]} onPointerDown={handlePlace}>
+      <primitive object={object} position={offset} />
+    </group>
+  );
+}
+
+function SceneModelOBJ({ url, onPlacePlant }: { url: string; onPlacePlant: (position: Position3D) => void }) {
+  const obj = useLoader(OBJLoader, url) as THREE.Group;
+
+  const { object, offset, scale } = useMemo(() => {
+    return fitObject(obj.clone(true));
+  }, [obj]);
+
+  function handlePlace(event: ThreeEvent<PointerEvent>) {
+    event.stopPropagation();
+    onPlacePlant(roundPosition(event.point));
+  }
+
+  return (
+    <group scale={[scale, scale, scale]} onPointerDown={handlePlace}>
+      <primitive object={object} position={offset} />
+    </group>
+  );
+}
+
+function SceneModelDAE({ url, onPlacePlant }: { url: string; onPlacePlant: (position: Position3D) => void }) {
+  const collada = useLoader(ColladaLoader, url) as { scene: THREE.Group };
+
+  const { object, offset, scale } = useMemo(() => {
+    return fitObject(collada.scene.clone(true));
+  }, [collada.scene]);
+
+  function handlePlace(event: ThreeEvent<PointerEvent>) {
+    event.stopPropagation();
+    onPlacePlant(roundPosition(event.point));
+  }
+
+  return (
+    <group scale={[scale, scale, scale]} onPointerDown={handlePlace}>
+      <primitive object={object} position={offset} />
+    </group>
+  );
+}
+
+function SceneModelSTL({ url, onPlacePlant }: { url: string; onPlacePlant: (position: Position3D) => void }) {
+  const source = useLoader(STLLoader, url) as THREE.BufferGeometry;
+
+  const { geometry, scale } = useMemo(() => {
+    return fitGeometry(source);
+  }, [source]);
+
+  function handlePlace(event: ThreeEvent<PointerEvent>) {
+    event.stopPropagation();
+    onPlacePlant(roundPosition(event.point));
+  }
+
+  return (
+    <mesh geometry={geometry} scale={[scale, scale, scale]} onPointerDown={handlePlace}>
+      <meshStandardMaterial color="#8ac5a2" metalness={0.1} roughness={0.7} />
+    </mesh>
+  );
+}
+
+function sceneExtension(url?: string | null, name?: string | null): string {
+  const value = (name || url || "").split("?")[0];
+  const ext = value.split(".").pop()?.toLowerCase();
+  return ext ?? "";
+}
+
+function SceneModel({
+  url,
+  name,
+  onPlacePlant,
+}: {
+  url: string;
+  name?: string | null;
+  onPlacePlant: (position: Position3D) => void;
+}) {
+  const ext = sceneExtension(url, name);
+
+  if (ext === "glb") {
+    return <SceneModelGLTF url={url} onPlacePlant={onPlacePlant} />;
+  }
+  if (ext === "fbx") {
+    return <SceneModelFBX url={url} onPlacePlant={onPlacePlant} />;
+  }
+  if (ext === "obj") {
+    return <SceneModelOBJ url={url} onPlacePlant={onPlacePlant} />;
+  }
+  if (ext === "dae") {
+    return <SceneModelDAE url={url} onPlacePlant={onPlacePlant} />;
+  }
+  if (ext === "stl") {
+    return <SceneModelSTL url={url} onPlacePlant={onPlacePlant} />;
+  }
+
+  return null;
 }
 
 function PlantPin({
@@ -118,6 +321,7 @@ function PlantPin({
 
 export default function GardenSceneEditor({
   sceneUrl,
+  sceneName,
   plants,
   selectedPlantId,
   onSelectPlant,
@@ -126,17 +330,22 @@ export default function GardenSceneEditor({
   return (
     <div className="h-[520px] w-full overflow-hidden rounded-[2rem] border border-white/10 bg-[#020a07]">
       <Canvas camera={{ position: [6, 6, 6], fov: 50 }} dpr={[1, 2]}>
-        <color attach="background" args={["#020a07"]} />
-        <fog attach="fog" args={["#020a07", 12, 40]} />
-        <ambientLight intensity={0.8} />
-        <directionalLight position={[8, 12, 6]} intensity={2.2} color="#f4fff8" />
-        <pointLight position={[-8, 6, -6]} intensity={1.2} color="#86efac" />
+        <color attach="background" args={["#081b14"]} />
+        <fog attach="fog" args={["#081b14", 18, 52]} />
+        <ambientLight intensity={1.8} color="#f3fff8" />
+        <hemisphereLight intensity={1.9} color="#f3fff8" groundColor="#163125" />
+        <directionalLight position={[8, 12, 6]} intensity={3.4} color="#ffffff" />
+        <directionalLight position={[-10, 8, -6]} intensity={2.2} color="#d7ffe7" />
+        <pointLight position={[-8, 6, -6]} intensity={1.8} color="#86efac" />
+        <pointLight position={[0, 5, 10]} intensity={1.4} color="#d9fff0" />
 
-        <gridHelper args={[40, 40, "#14532d", "#0b2b1f"]} position={[0, 0, 0]} />
+        <gridHelper args={[40, 40, "#1f7a52", "#123525"]} position={[0, 0, 0]} />
         <PlacementSurface onPlacePlant={onPlacePlant} />
 
         <Suspense fallback={null}>
-          {sceneUrl ? <SceneModel url={sceneUrl} onPlacePlant={onPlacePlant} /> : null}
+          {sceneUrl ? (
+            <SceneModel url={sceneUrl} name={sceneName} onPlacePlant={onPlacePlant} />
+          ) : null}
         </Suspense>
 
         {plants.map((plant) => (

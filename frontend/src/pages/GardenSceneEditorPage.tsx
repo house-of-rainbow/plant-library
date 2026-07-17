@@ -69,6 +69,7 @@ export default function GardenSceneEditorPage() {
   }, [orderedPlants, selectedPlantId]);
 
   const selectedPlant = orderedPlants.find((plant) => plant.id === selectedPlantId) ?? null;
+  const sceneUrl = propertyId && garden?.scene ? gardensApi.sceneUrl(propertyId, garden.id) : null;
 
   const saveGarden = useMutation({
     mutationFn: () =>
@@ -143,7 +144,7 @@ export default function GardenSceneEditorPage() {
           </button>
           <h1 className="font-display text-3xl font-bold mt-2">{garden.name} scene editor</h1>
           <p className="text-white/55 max-w-3xl">
-            Upload an optional Polycam `GLB`, then select a plant and click anywhere in the scene to drop its pin.
+            Upload an optional Polycam 3D export, then select a plant and click anywhere in the scene to drop its pin.
           </p>
         </div>
 
@@ -169,7 +170,8 @@ export default function GardenSceneEditorPage() {
             </div>
 
             <GardenSceneEditor
-              sceneUrl={garden.scene?.model_url}
+              sceneUrl={sceneUrl}
+              sceneName={garden.scene?.model_filename}
               plants={orderedPlants}
               selectedPlantId={selectedPlantId}
               onSelectPlant={setSelectedPlantId}
@@ -205,11 +207,11 @@ export default function GardenSceneEditorPage() {
                 />
               </div>
               <div>
-                <label className="label">Polycam GLB</label>
+                <label className="label">Polycam scene file</label>
                 {isOwner ? (
                   <input
                     type="file"
-                    accept=".glb,model/gltf-binary"
+                    accept=".glb,.fbx,.obj,.stl,.dae"
                     className="block w-full text-sm text-white/70"
                     onChange={(event) => {
                       const file = event.target.files?.[0];
@@ -239,6 +241,7 @@ export default function GardenSceneEditorPage() {
               <span>
                 {garden.scene?.model_filename ? `Current file: ${garden.scene.model_filename}` : "No scene file uploaded"}
               </span>
+              <span>Best results: Polycam FBX. Single-file GLB/OBJ/STL/DAE also work.</span>
               {garden.scene && isOwner && (
                 <button className="btn-ghost" onClick={() => clearScene.mutate()} disabled={clearScene.isPending}>
                   {clearScene.isPending ? "Removing…" : "Remove scene"}
