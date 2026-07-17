@@ -373,7 +373,15 @@ export interface IdentifyResponse {
   candidates: IdentifyCandidate[];
 }
 
-export type IdentifyStep = "start" | "plantnet" | "openai" | "consolidate" | "toxicity" | "enrich" | "complete";
+export type IdentifyStep =
+  | "start"
+  | "plantnet"
+  | "openai"
+  | "consolidate"
+  | "toxicity"
+  | "articles"
+  | "enrich"
+  | "complete";
 export type IdentifyStepStatus = "running" | "done" | "error" | "skipped";
 
 export interface IdentifyStreamEvent {
@@ -381,7 +389,9 @@ export interface IdentifyStreamEvent {
   status?: IdentifyStepStatus;
   count?: number;
   candidates?: IdentifyCandidate[];
+  candidate?: IdentifyCandidate;
   summary?: string | null;
+  detail?: string;
   source?: string;
   engines?: { plantnet: boolean; openai: boolean };
 }
@@ -417,6 +427,43 @@ export const identifyApi = {
     });
     if (!resp.ok || !resp.body) {
       throw new Error(`Identify failed (${resp.status})`);
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const raw = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (raw) onEvent(JSON.parse(raw) as IdentifyStreamEvent);
+      }
+    }
+    const tail = buf.trim();
+    if (tail) onEvent(JSON.parse(tail) as IdentifyStreamEvent);
+  },
+
+  enrichSelectedStream: async (
+    files: File[],
+    candidate: IdentifyCandidate,
+    promptContext: string | undefined,
+    onEvent: (e: IdentifyStreamEvent) => void
+  ): Promise<void> => {
+    const form = new FormData();
+    files.forEach((f) => form.append("images", f));
+    form.append("candidate_json", JSON.stringify(candidate));
+    if (promptContext?.trim()) form.append("prompt_context", promptContext.trim());
+    const headers = await authHeaders();
+    const resp = await fetch(`${baseURL}/api/identify/enrich-selected/stream`, {
+      method: "POST",
+      body: form,
+      headers,
+    });
+    if (!resp.ok || !resp.body) {
+      throw new Error(`Identify enrichment failed (${resp.status})`);
     }
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -9,19 +9,32 @@ import {
   type IdentifyStepStatus,
 } from "../api";
 import type { PlantClass } from "../types";
+import IdentifyScene from "../three/IdentifyScene";
 
 const MAX_PHOTOS = 5;
 
-type StepKey = "plantnet" | "openai" | "consolidate" | "toxicity" | "enrich";
+type StepKey = "plantnet" | "openai" | "consolidate" | "toxicity" | "articles" | "enrich";
 const STEPS: { key: StepKey; label: string }[] = [
   { key: "plantnet", label: "Pl@ntNet" },
   { key: "openai", label: "GPT vision" },
   { key: "consolidate", label: "Consolidating" },
   { key: "toxicity", label: "Pet toxicity (ASPCA)" },
-  { key: "enrich", label: "Final enrichment" },
+  { key: "articles", label: "Wikipedia articles" },
+  { key: "enrich", label: "Species profile" },
 ];
+const STEP_COLORS: Record<StepKey, string> = {
+  plantnet: "#45bd7b",
+  openai: "#38bdf8",
+  consolidate: "#a78bfa",
+  toxicity: "#fb7185",
+  articles: "#fbbf24",
+  enrich: "#34d399",
+};
 
-type StepState = Record<StepKey, { status?: IdentifyStepStatus; count?: number }>;
+type StepState = Record<
+  StepKey,
+  { status?: IdentifyStepStatus; count?: number; detail?: string }
+>;
 const EMPTY_STEPS = {} as StepState;
 
 function confidenceColor(score: number): string {
@@ -101,10 +114,12 @@ function StepRow({
   label,
   status,
   count,
+  detail,
 }: {
   label: string;
   status?: IdentifyStepStatus;
   count?: number;
+  detail?: string;
 }) {
   let icon = <span className="h-4 w-4 rounded-full bg-white/15" />;
   let tone = "text-white/40";
@@ -130,16 +145,21 @@ function StepRow({
     tone = "text-white/30";
   }
   return (
-    <div className={`flex items-center gap-3 text-sm ${tone}`}>
+    <div className={`flex items-start gap-3 text-sm ${tone}`}>
       <span className="grid h-5 w-5 place-items-center">{icon}</span>
-      <span className="flex-1">{label}</span>
-      {typeof count === "number" && status === "done" && (
-        <span className="text-xs text-white/40">
-          {count} match{count === 1 ? "" : "es"}
-        </span>
-      )}
-      {status === "error" && <span className="text-xs">unavailable</span>}
-      {status === "skipped" && <span className="text-xs">not configured</span>}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="flex-1">{label}</span>
+          {typeof count === "number" && status === "done" && !detail && (
+            <span className="text-xs text-white/40">
+              {count} match{count === 1 ? "" : "es"}
+            </span>
+          )}
+          {status === "error" && !detail && <span className="text-xs">unavailable</span>}
+          {status === "skipped" && !detail && <span className="text-xs">not configured</span>}
+        </div>
+        {detail && <p className="mt-0.5 truncate text-xs text-white/45">{detail}</p>}
+      </div>
     </div>
   );
 }
@@ -177,6 +197,7 @@ export default function IdentifyModal({
   }>({ plantnet: [], openai: [] });
   const [showDetails, setShowDetails] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
 
@@ -221,6 +242,8 @@ export default function IdentifyModal({
       openai: { status: "running" },
       consolidate: {},
       toxicity: {},
+      articles: { detail: "Runs after you choose a plant" },
+      enrich: { detail: "Runs after you choose a plant" },
     } as StepState);
     setEngineResults({ plantnet: [], openai: [] });
     setShowDetails(false);
@@ -234,10 +257,14 @@ export default function IdentifyModal({
           e.step === "openai" ||
           e.step === "consolidate" ||
           e.step === "toxicity" ||
+          e.step === "articles" ||
           e.step === "enrich"
         ) {
           const key = e.step as StepKey;
-          setSteps((prev) => ({ ...prev, [key]: { status: e.status, count: e.count } }));
+          setSteps((prev) => ({
+            ...prev,
+            [key]: { status: e.status, count: e.count, detail: e.detail },
+          }));
           if ((e.step === "plantnet" || e.step === "openai") && e.candidates) {
             const engine = e.step;
             setEngineResults((prev) => ({ ...prev, [engine]: e.candidates ?? [] }));
@@ -261,55 +288,98 @@ export default function IdentifyModal({
 
   const use = useMutation({
     mutationFn: async (candidate: IdentifyCandidate) => {
-      const imageUrls = await Promise.all(files.map((f) => imagesApi.upload(f)));
       let cls = matchClass(candidate);
+      let selected = candidate;
       if (!cls) {
-        const tox = candidate.pet_toxicity;
+        setSteps((prev) => ({
+          ...prev,
+          toxicity: { status: "running" },
+          articles: {},
+          enrich: {},
+        }));
+        try {
+          await identifyApi.enrichSelectedStream(files, candidate, promptContext, (e) => {
+            if (e.step === "complete" && e.candidate) {
+              selected = e.candidate;
+              setCandidates((prev) =>
+                prev?.map((item) =>
+                  normalize(item.scientific_name_without_author || item.scientific_name) ===
+                  normalize(selected.scientific_name_without_author || selected.scientific_name)
+                    ? selected
+                    : item
+                ) ?? prev
+              );
+              return;
+            }
+            if (
+              e.step === "toxicity" ||
+              e.step === "articles" ||
+              e.step === "enrich"
+            ) {
+              const key = e.step as StepKey;
+              setSteps((prev) => ({
+                ...prev,
+                [key]: { status: e.status, count: e.count, detail: e.detail },
+              }));
+            }
+          });
+        } catch {
+          setSteps((prev) => ({
+            ...prev,
+            enrich: { status: "error", detail: "Using the identification result" },
+          }));
+        }
+
+        const imageUrls = await Promise.all(files.map((f) => imagesApi.upload(f)));
+        const tox = selected.pet_toxicity;
         const careNotes = [
-          candidate.care_notes,
+          selected.care_notes,
           tox && tox.matched ? tox.summary : "",
           tox?.toxic_principles ? `Toxic principles: ${tox.toxic_principles}` : "",
           tox?.clinical_signs ? `Clinical signs: ${tox.clinical_signs}` : "",
         ]
           .filter(Boolean)
           .join("\n\n");
-        const referenceUrls = [candidate.reference_url, tox?.source_url]
+        const referenceUrls = [selected.reference_url, tox?.source_url]
           .filter((value): value is string => !!value)
           .filter((value, index, list) => list.indexOf(value) === index);
         cls = await classesApi.create(propertyId, {
           common_name:
-            candidate.common_name ||
-            candidate.scientific_name_without_author ||
-            candidate.scientific_name,
+            selected.common_name ||
+            selected.scientific_name_without_author ||
+            selected.scientific_name,
           scientific_name:
-            candidate.scientific_name_without_author || candidate.scientific_name,
-          family: candidate.family || undefined,
-          genus: candidate.genus || undefined,
-          description: candidate.description || undefined,
+            selected.scientific_name_without_author || selected.scientific_name,
+          family: selected.family || undefined,
+          genus: selected.genus || undefined,
+          description: selected.description || undefined,
           reference_urls: referenceUrls,
-          hero_image_url: candidate.image_url || undefined,
+          hero_image_url: selected.image_url || undefined,
           care_defaults: {
-            watering_interval_days: candidate.watering_interval_days ?? undefined,
-            watering_notes: candidate.watering_notes || undefined,
-            sunlight: candidate.sunlight || undefined,
-            light_notes: candidate.light_notes || undefined,
-            fertilizing_interval_days: candidate.fertilizing_interval_days ?? undefined,
-            fertilizer_type: candidate.fertilizer_type || undefined,
-            fertilizer_notes: candidate.fertilizer_notes || undefined,
-            repotting_interval_months: candidate.repotting_interval_months ?? undefined,
-            soil_type: candidate.soil_type || undefined,
-            pot_size: candidate.pot_size || undefined,
-            hardiness_zone: candidate.hardiness_zone || undefined,
-            mature_size: candidate.mature_size || undefined,
-            pruning_notes: candidate.pruning_notes || undefined,
-            propagation_notes: candidate.propagation_notes || undefined,
-            pests_notes: candidate.pests_notes || undefined,
-            toxic_to_pets: tox?.toxic_to_pets ?? candidate.toxic_to_pets ?? undefined,
+            watering_interval_days: selected.watering_interval_days ?? undefined,
+            watering_notes: selected.watering_notes || undefined,
+            sunlight: selected.sunlight || undefined,
+            light_notes: selected.light_notes || undefined,
+            fertilizing_interval_days: selected.fertilizing_interval_days ?? undefined,
+            fertilizer_type: selected.fertilizer_type || undefined,
+            fertilizer_notes: selected.fertilizer_notes || undefined,
+            repotting_interval_months: selected.repotting_interval_months ?? undefined,
+            soil_type: selected.soil_type || undefined,
+            pot_size: selected.pot_size || undefined,
+            hardiness_zone: selected.hardiness_zone || undefined,
+            mature_size: selected.mature_size || undefined,
+            pruning_notes: selected.pruning_notes || undefined,
+            propagation_notes: selected.propagation_notes || undefined,
+            pests_notes: selected.pests_notes || undefined,
+            toxic_to_pets: tox?.toxic_to_pets ?? selected.toxic_to_pets ?? undefined,
             care_notes: careNotes || undefined,
           },
         } as Partial<PlantClass>);
         qc.invalidateQueries({ queryKey: ["classes"] });
+        return { classId: cls.id, imageUrls, promptContext: promptContext.trim() };
       }
+
+      const imageUrls = await Promise.all(files.map((f) => imagesApi.upload(f)));
       return { classId: cls.id, imageUrls, promptContext: promptContext.trim() };
     },
     onSuccess: (r) => {
@@ -318,7 +388,79 @@ export default function IdentifyModal({
     },
   });
 
-  const showSteps = running || candidates !== null;
+  const shouldKeepScreenAwake = open && (running || use.isPending);
+
+  useEffect(() => {
+    async function releaseWakeLock() {
+      const sentinel = wakeLockRef.current;
+      wakeLockRef.current = null;
+      if (!sentinel) return;
+      try {
+        await sentinel.release();
+      } catch {
+        // Ignore release races from the browser.
+      }
+    }
+
+    if (
+      !shouldKeepScreenAwake ||
+      typeof navigator === "undefined" ||
+      !("wakeLock" in navigator)
+    ) {
+      void releaseWakeLock();
+      return;
+    }
+
+    let disposed = false;
+
+    async function requestWakeLock() {
+      if (document.visibilityState !== "visible" || wakeLockRef.current) return;
+      try {
+        const sentinel = await navigator.wakeLock.request("screen");
+        if (disposed) {
+          await sentinel.release();
+          return;
+        }
+        wakeLockRef.current = sentinel;
+        sentinel.addEventListener("release", () => {
+          if (wakeLockRef.current === sentinel) {
+            wakeLockRef.current = null;
+          }
+        });
+      } catch {
+        // Wake lock is best-effort and unsupported on some mobile browsers.
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible" && shouldKeepScreenAwake) {
+        void requestWakeLock();
+      }
+    }
+
+    void requestWakeLock();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      void releaseWakeLock();
+    };
+  }, [shouldKeepScreenAwake]);
+
+  const showSteps = running || use.isPending || candidates !== null;
+  const sceneActive = running || use.isPending;
+  const sceneCelebrate = !sceneActive && (candidates?.length ?? 0) > 0;
+  const sceneSteps = STEPS.map((s) => ({
+    key: s.key,
+    color: STEP_COLORS[s.key],
+    status: steps[s.key]?.status,
+  }));
+  const sceneCaption = sceneActive
+    ? "Analyzing specimen…"
+    : sceneCelebrate
+      ? "Match locked in"
+      : "Identification chamber";
 
   return (
     <AnimatePresence>
@@ -353,7 +495,7 @@ export default function IdentifyModal({
                 placeholder="Example: I bought this as a Red Banana at Burien Nursery, but the label might be wrong."
               />
               <p className="mt-1 text-xs text-white/45">
-                Added to GPT Vision and consolidation only. Useful when you already have a likely name, source, or note about the plant.
+                Added to GPT Vision, consolidation, and the post-selection species profile step. Useful when you already have a likely name, source, or note about the plant.
               </p>
             </div>
 
@@ -396,6 +538,29 @@ export default function IdentifyModal({
 
             {error && <p className="text-sm text-red-300">{error}</p>}
 
+            {/* Identification chamber (three.js) */}
+            {showSteps && (
+              <div className="relative h-56 overflow-hidden rounded-2xl border border-white/10 bg-black/50 shadow-inner">
+                <IdentifyScene
+                  steps={sceneSteps}
+                  active={sceneActive}
+                  celebrate={sceneCelebrate}
+                />
+                <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-3">
+                  <span className="text-[11px] uppercase tracking-[0.25em] text-white/55">
+                    {sceneCaption}
+                  </span>
+                  {sceneActive && (
+                    <motion.span
+                      animate={{ opacity: [0.3, 1, 0.3] }}
+                      transition={{ repeat: Infinity, duration: 1.4 }}
+                      className="h-2 w-2 rounded-full bg-canopy-300"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Progress stepper */}
             {showSteps && (
               <div className="glass-soft p-4 space-y-2.5">
@@ -405,6 +570,7 @@ export default function IdentifyModal({
                     label={s.label}
                     status={steps[s.key]?.status}
                     count={steps[s.key]?.count}
+                    detail={steps[s.key]?.detail}
                   />
                 ))}
               </div>
@@ -500,7 +666,7 @@ export default function IdentifyModal({
                   );
                 })}
                 {use.isPending && (
-                  <p className="text-xs text-white/40">Saving species & photos…</p>
+                  <p className="text-xs text-white/40">Preparing the selected plant and saving photos…</p>
                 )}
                 {use.isError && (
                   <p className="text-sm text-red-300">Couldn't save. Please retry.</p>

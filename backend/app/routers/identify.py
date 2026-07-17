@@ -14,7 +14,7 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from ..auth import CurrentUser, get_current_user
 from ..aspca import lookup_pet_toxicity
@@ -357,6 +357,10 @@ def _apply_enrichment(
         target.care_notes = item.care_notes
 
 
+def _candidate_lookup_names(candidate: IdentifyCandidate) -> list[str]:
+    return list(candidate.common_names) or ([candidate.common_name] if candidate.common_name else [])
+
+
 @router.post("/stream")
 async def identify_stream(
     images: list[UploadFile] = File(...),
@@ -491,12 +495,9 @@ async def identify_stream(
             yield line({"step": "toxicity", "status": "running"})
             try:
                 top = final[0]
-                names = list(top.common_names) or (
-                    [top.common_name] if top.common_name else []
-                )
                 tox = await lookup_pet_toxicity(
                     top.scientific_name_without_author or top.scientific_name,
-                    names,
+                    _candidate_lookup_names(top),
                 )
                 top.pet_toxicity = tox.model_dump()
                 yield line(
@@ -513,32 +514,6 @@ async def identify_stream(
         else:
             yield line({"step": "toxicity", "status": "skipped"})
 
-        if final and has_ai:
-            yield line({"step": "enrich", "status": "running"})
-            aspca_context = (
-                json.dumps(final[0].pet_toxicity)
-                if final and final[0].pet_toxicity is not None
-                else None
-            )
-            try:
-                enriched, references = await enrich_candidates_with_openai(
-                    [(data, ct) for _, data, ct in raw],
-                    _enrichment_summary(final),
-                    aspca_context,
-                    api_key=settings.openai_api_key,
-                    model=settings.openai_model,
-                    wikipedia_client=_wikipedia,
-                    prompt_context=prompt_context,
-                )
-                _apply_enrichment(final, enriched.candidates)
-                apply_reference_metadata(final, references)
-                yield line({"step": "enrich", "status": "done"})
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Final enrichment failed: %s", exc)
-                yield line({"step": "enrich", "status": "error"})
-        else:
-            yield line({"step": "enrich", "status": "skipped"})
-
         yield line(
             {
                 "step": "complete",
@@ -547,6 +522,165 @@ async def identify_stream(
                 "candidates": [c.model_dump() for c in final],
             }
         )
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+@router.post("/enrich-selected/stream")
+async def enrich_selected_stream(
+    images: list[UploadFile] = File(...),
+    candidate_json: str = Form(...),
+    prompt_context: str | None = Form(default=None),
+    settings: Settings = Depends(get_settings),
+    _: CurrentUser = Depends(get_current_user),
+):
+    raw = await _read_images(images)
+    try:
+        candidate = IdentifyCandidate.model_validate_json(candidate_json)
+    except ValidationError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Invalid candidate payload.",
+        ) from exc
+
+    async def gen():
+        def line(obj: dict) -> str:
+            return json.dumps(obj) + "\n"
+
+        selected = candidate.model_copy(deep=True)
+        yield line({"step": "start", "mode": "enrich-selected"})
+
+        if settings.aspca_enabled:
+            yield line({"step": "toxicity", "status": "running"})
+            try:
+                tox = await lookup_pet_toxicity(
+                    selected.scientific_name_without_author or selected.scientific_name,
+                    _candidate_lookup_names(selected),
+                )
+                selected.pet_toxicity = tox.model_dump()
+                yield line(
+                    {
+                        "step": "toxicity",
+                        "status": "done",
+                        "label_level": tox.label_level,
+                        "matched": tox.matched,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Toxicity lookup failed for selected candidate: %s", exc)
+                yield line({"step": "toxicity", "status": "error"})
+        else:
+            yield line({"step": "toxicity", "status": "skipped"})
+
+        if not settings.openai_api_key:
+            yield line({"step": "articles", "status": "skipped"})
+            yield line({"step": "enrich", "status": "skipped"})
+            yield line({"step": "complete", "candidate": selected.model_dump()})
+            return
+
+        yield line({"step": "enrich", "status": "running"})
+
+        article_events: asyncio.Queue[dict] = asyncio.Queue()
+        article_count = 0
+
+        async def on_tool_event(event: dict) -> None:
+            await article_events.put(event)
+
+        aspca_context = (
+            json.dumps(selected.pet_toxicity)
+            if selected.pet_toxicity is not None
+            else None
+        )
+
+        enrich_task = asyncio.create_task(
+            enrich_candidates_with_openai(
+                [(data, ct) for _, data, ct in raw],
+                _enrichment_summary([selected]),
+                aspca_context,
+                api_key=settings.openai_api_key,
+                model=settings.openai_model,
+                wikipedia_client=_wikipedia,
+                prompt_context=prompt_context,
+                on_tool_event=on_tool_event,
+            )
+        )
+        article_task = asyncio.create_task(article_events.get())
+        article_error: Exception | None = None
+
+        while not enrich_task.done():
+            done, _ = await asyncio.wait(
+                {enrich_task, article_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if article_task in done:
+                event = article_task.result()
+                article_count = max(article_count, int(event.get("count", article_count or 0)))
+                query = str(event.get("query", "")).strip()
+                detail = f"Looking up {query}" if query else "Looking up article"
+                yield line(
+                    {
+                        "step": "articles",
+                        "status": "running",
+                        "count": article_count,
+                        "detail": detail,
+                    }
+                )
+                article_task = asyncio.create_task(article_events.get())
+
+        if not article_task.done():
+            article_task.cancel()
+
+        while not article_events.empty():
+            event = await article_events.get()
+            article_count = max(article_count, int(event.get("count", article_count or 0)))
+            query = str(event.get("query", "")).strip()
+            detail = f"Looking up {query}" if query else "Looking up article"
+            yield line(
+                {
+                    "step": "articles",
+                    "status": "running",
+                    "count": article_count,
+                    "detail": detail,
+                }
+            )
+
+        try:
+            enriched, references = await enrich_task
+            _apply_enrichment([selected], enriched.candidates)
+            apply_reference_metadata([selected], references)
+        except Exception as exc:  # noqa: BLE001
+            article_error = exc
+
+        if article_count:
+            yield line(
+                {
+                    "step": "articles",
+                    "status": "done" if article_error is None else "error",
+                    "count": article_count,
+                    "detail": f"Checked {article_count} article{'s' if article_count != 1 else ''}",
+                }
+            )
+        else:
+            yield line({"step": "articles", "status": "skipped", "detail": "No article lookup needed"})
+
+        if article_error is not None:
+            logger.warning("Selected-candidate enrichment failed: %s", article_error)
+            yield line(
+                {
+                    "step": "enrich",
+                    "status": "error",
+                    "detail": "Using the identification result",
+                }
+            )
+            yield line({"step": "complete", "candidate": selected.model_dump()})
+            return
+
+        yield line({"step": "enrich", "status": "done"})
+        yield line({"step": "complete", "candidate": selected.model_dump()})
 
     return StreamingResponse(
         gen(),

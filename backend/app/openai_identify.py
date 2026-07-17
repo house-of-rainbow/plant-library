@@ -7,6 +7,7 @@ care hints) with a confidence score, strongly typed.
 from __future__ import annotations
 
 import base64
+from collections.abc import Awaitable, Callable
 import json
 import logging
 from typing import Optional
@@ -18,6 +19,8 @@ from .models import SunlightLevel
 from .wikipedia import WikipediaArticle, WikipediaClient
 
 logger = logging.getLogger("plantlibrary.identify.openai")
+
+ToolEventCallback = Callable[[dict], Awaitable[None]]
 
 _PROMPT = (
     "You are an expert botanist and houseplant specialist. Identify the plant in "
@@ -242,6 +245,7 @@ async def enrich_candidates_with_openai(
     model: str,
     wikipedia_client: WikipediaClient,
     prompt_context: str | None = None,
+    on_tool_event: ToolEventCallback | None = None,
 ) -> tuple[Enrichment, dict[str, WikipediaArticle]]:
     """Fill species-profile fields after identification and ASPCA enrichment."""
     client = AsyncOpenAI(api_key=api_key)
@@ -277,6 +281,7 @@ async def enrich_candidates_with_openai(
     ]
 
     fetched_references: dict[str, WikipediaArticle] = {}
+    lookup_count = 0
     response = await client.responses.create(
         model=model,
         input=[{"role": "user", "content": content}],
@@ -297,6 +302,9 @@ async def enrich_candidates_with_openai(
             except json.JSONDecodeError:
                 args = {}
             query = str(args.get("query", "")).strip()
+            lookup_count += 1
+            if on_tool_event is not None:
+                await on_tool_event({"query": query, "count": lookup_count})
             article = await wikipedia_client.get_article(query)
             if article is not None:
                 fetched_references[query.lower()] = article
