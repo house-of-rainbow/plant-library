@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -42,6 +42,24 @@ function confidenceColor(score: number): string {
   if (score >= 0.2) return "#fbbf24";
   return "#f87171";
 }
+
+/**
+ * Browsers can't render HEIC/HEIF via object URLs, so those files show a broken
+ * thumbnail. We detect them (type is often empty on HEIC, so also check the
+ * extension) and render a placeholder tile instead. The backend transcodes the
+ * actual bytes to JPEG on upload.
+ */
+function isHeicFile(file: File): boolean {
+  const type = (file.type || "").toLowerCase();
+  if (type === "image/heic" || type === "image/heif") return true;
+  return /\.(heic|heif)$/i.test(file.name);
+}
+
+type PreviewItem = {
+  key: string;
+  url: string | null;
+  status: "ready" | "loading" | "error";
+};
 
 function normalize(s?: string | null): string {
   return (s ?? "").trim().toLowerCase();
@@ -165,6 +183,40 @@ function StepRow({
 }
 
 /**
+ * Best-effort detection of a usable camera. When no camera is present we must
+ * NOT set the `capture` attribute on the file input — forcing camera capture on
+ * a camera-less device breaks plain file uploads entirely. Defaults to false so
+ * that upload always works until a camera is confirmed.
+ */
+function useHasCamera(): boolean {
+  const [hasCamera, setHasCamera] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const media = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
+    if (!media || typeof media.enumerateDevices !== "function") {
+      return;
+    }
+
+    media
+      .enumerateDevices()
+      .then((devices) => {
+        if (cancelled) return;
+        setHasCamera(devices.some((d) => d.kind === "videoinput"));
+      })
+      .catch(() => {
+        if (!cancelled) setHasCamera(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return hasCamera;
+}
+
+/**
  * Camera-first identification. Snap up to 5 photos, then the backend queries
  * Pl@ntNet and GPT in parallel and asks GPT to consolidate both — progress is
  * streamed and shown as steps. Pick a candidate to use (creating the species if
@@ -198,8 +250,57 @@ export default function IdentifyModal({
   const [showDetails, setShowDetails] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const hasCamera = useHasCamera();
 
-  const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
+  const [previews, setPreviews] = useState<PreviewItem[]>([]);
+
+  // Build local thumbnails for the selected files. Formats browsers can render
+  // (JPEG/PNG/…) use a synchronous object URL; HEIC/HEIF are transcoded to JPEG
+  // by the backend preview endpoint and swapped in when ready.
+  useEffect(() => {
+    let cancelled = false;
+    const created: string[] = [];
+
+    const base: PreviewItem[] = files.map((f, i) => {
+      const key = `${f.name}-${f.size}-${i}`;
+      if (isHeicFile(f)) {
+        return { key, url: null, status: "loading" as const };
+      }
+      const url = URL.createObjectURL(f);
+      created.push(url);
+      return { key, url, status: "ready" as const };
+    });
+    setPreviews(base);
+
+    files.forEach((f, i) => {
+      if (!isHeicFile(f)) return;
+      imagesApi
+        .preview(f)
+        .then((blob) => {
+          if (cancelled) return;
+          const url = URL.createObjectURL(blob);
+          created.push(url);
+          setPreviews((prev) => {
+            const next = [...prev];
+            if (next[i]) next[i] = { ...next[i], url, status: "ready" };
+            return next;
+          });
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setPreviews((prev) => {
+            const next = [...prev];
+            if (next[i]) next[i] = { ...next[i], status: "error" };
+            return next;
+          });
+        });
+    });
+
+    return () => {
+      cancelled = true;
+      created.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [files]);
 
   function reset() {
     setFiles([]);
@@ -501,9 +602,30 @@ export default function IdentifyModal({
 
             {/* Photo tray */}
             <div className="flex flex-wrap gap-2">
-              {previews.map((src, i) => (
-                <div key={src} className="relative">
-                  <img src={src} className="h-20 w-20 rounded-xl object-cover" />
+              {previews.map((p, i) => (
+                <div key={p.key} className="relative">
+                  {p.url ? (
+                    <img src={p.url} className="h-20 w-20 rounded-xl object-cover" />
+                  ) : p.status === "loading" ? (
+                    <div className="grid h-20 w-20 place-items-center rounded-xl border border-white/10 bg-white/5">
+                      <motion.span
+                        animate={{ rotate: 360 }}
+                        transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                        className="inline-block text-canopy-300"
+                      >
+                        ◌
+                      </motion.span>
+                    </div>
+                  ) : (
+                    <div className="grid h-20 w-20 place-items-center rounded-xl border border-white/10 bg-white/5 text-center">
+                      <div>
+                        <div className="text-2xl leading-none">🌿</div>
+                        <div className="mt-1 text-[9px] uppercase tracking-wider text-white/50">
+                          HEIC
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <button
                     onClick={() => removeFile(i)}
                     className="absolute -top-1.5 -right-1.5 grid h-5 w-5 place-items-center rounded-full bg-red-500 text-white text-xs"
@@ -519,7 +641,7 @@ export default function IdentifyModal({
                   <input
                     type="file"
                     accept="image/*"
-                    capture="environment"
+                    {...(hasCamera ? { capture: "environment" as const } : {})}
                     multiple
                     className="hidden"
                     onChange={addFiles}

@@ -19,6 +19,7 @@ from pydantic import BaseModel, ValidationError
 from ..auth import CurrentUser, get_current_user
 from ..aspca import lookup_pet_toxicity
 from ..config import Settings, get_settings
+from ..image_convert import normalize_image
 from ..models import SunlightLevel
 from ..openai_identify import (
     consolidate_with_openai,
@@ -244,13 +245,16 @@ async def identify(
 
     raw: list[tuple[str, bytes, str]] = []
     for img in images:
-        content_type = img.content_type or "image/jpeg"
+        data = await img.read()
+        data, content_type = normalize_image(
+            data, img.content_type, img.filename
+        )
+        content_type = content_type or "image/jpeg"
         if content_type not in _ALLOWED_CONTENT_TYPES:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
                 f"Unsupported image type: {content_type}",
             )
-        data = await img.read()
         raw.append((img.filename or "image.jpg", data, content_type))
 
     # Primary: Pl@ntNet.
@@ -282,12 +286,15 @@ async def _read_images(images: list[UploadFile]) -> list[tuple[str, bytes, str]]
         )
     raw: list[tuple[str, bytes, str]] = []
     for img in images:
-        content_type = img.content_type or "image/jpeg"
+        data = await img.read()
+        data, content_type = normalize_image(
+            data, img.content_type, img.filename
+        )
+        content_type = content_type or "image/jpeg"
         if content_type not in _ALLOWED_CONTENT_TYPES:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, f"Unsupported image type: {content_type}"
             )
-        data = await img.read()
         raw.append((img.filename or "image.jpg", data, content_type))
     return raw
 

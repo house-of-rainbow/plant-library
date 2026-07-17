@@ -302,6 +302,23 @@ export const imagesApi = {
     });
     return data.url;
   },
+
+  // Transcode an image to a browser-renderable format (e.g. HEIC -> JPEG) for
+  // local thumbnails, without persisting it to storage.
+  preview: async (file: File): Promise<Blob> => {
+    const form = new FormData();
+    form.append("file", file);
+    const headers = await authHeaders();
+    const resp = await fetch(`${baseURL}/api/images/preview`, {
+      method: "POST",
+      body: form,
+      headers,
+    });
+    if (!resp.ok) {
+      throw new Error(`Preview failed (${resp.status})`);
+    }
+    return await resp.blob();
+  },
 };
 
 // ---- Dashboard ----
