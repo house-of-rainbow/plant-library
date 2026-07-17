@@ -1,6 +1,8 @@
 """Shared FastAPI dependencies and tenancy authorization helpers."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import HTTPException, status
 
 from .auth import CurrentUser
@@ -13,6 +15,8 @@ from .repositories import (
     TagRepository,
     TenancyRepository,
 )
+
+logger = logging.getLogger("plantlibrary.deps")
 
 
 def class_repo() -> PlantClassRepository:
@@ -50,14 +54,33 @@ async def authorize(
     """
     prop = await tenancy.get_property(property_id)
     if prop is None:
+        logger.warning("Authorization failed: property not found property_id=%s user_oid=%s", property_id, user.oid)
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Property not found")
     membership = await tenancy.get_membership(property_id, user.oid, user.email)
     if membership is None:
+        logger.warning(
+            "Authorization failed: membership missing property_id=%s user_oid=%s",
+            property_id,
+            user.oid,
+        )
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "You do not have access to this property"
         )
     if require_owner and membership.role != MemberRole.owner:
+        logger.warning(
+            "Authorization failed: owner role required property_id=%s user_oid=%s role=%s",
+            property_id,
+            user.oid,
+            membership.role,
+        )
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "Only the property owner can perform this action"
         )
+    logger.debug(
+        "Authorization granted property_id=%s user_oid=%s role=%s owner_required=%s",
+        property_id,
+        user.oid,
+        membership.role,
+        require_owner,
+    )
     return membership

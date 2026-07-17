@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 from logging.config import dictConfig
 from typing import Any
 
 _VALID_LOG_LEVELS = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
+logger = logging.getLogger("plantlibrary.logging")
 
 
 def normalize_log_level(level: str | None) -> str:
@@ -97,4 +99,5 @@ def build_logging_config(level: str | None) -> dict[str, Any]:
 def configure_logging(level: str | None) -> str:
     normalized_level = normalize_log_level(level)
     dictConfig(build_logging_config(normalized_level))
+    logger.debug("Configured application logging level=%s", normalized_level)
     return normalized_level

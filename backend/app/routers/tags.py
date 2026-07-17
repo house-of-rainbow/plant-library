@@ -8,6 +8,7 @@ every plant carrying the tag.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -26,6 +27,7 @@ from ..models import (
 from ..repositories import PlantInstanceRepository, TagRepository, TenancyRepository
 
 router = APIRouter(prefix="/api/properties/{property_id}/tags", tags=["tags"])
+logger = logging.getLogger("plantlibrary.routers.tags")
 
 
 def _apply_event(instance, event: CareEvent) -> None:
@@ -51,7 +53,15 @@ async def list_tags(
     user: CurrentUser = Depends(get_current_user),
 ):
     await authorize(tenancy, property_id, user)
-    return await tags.list(property_id, garden_id=garden_id, scope=scope)
+    result = await tags.list(property_id, garden_id=garden_id, scope=scope)
+    logger.debug(
+        "Listed tags property_id=%s garden_id=%s scope=%s count=%s",
+        property_id,
+        garden_id,
+        scope,
+        len(result),
+    )
+    return result
 
 
 @router.post("", response_model=Tag, status_code=status.HTTP_201_CREATED)
@@ -72,7 +82,9 @@ async def create_tag(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Referenced garden does not exist")
     else:
         payload.garden_id = None
-    return await tags.create(property_id, payload)
+    tag = await tags.create(property_id, payload)
+    logger.info("Created tag property_id=%s tag_id=%s", property_id, tag.id)
+    return tag
 
 
 @router.patch("/{tag_id}", response_model=Tag)
@@ -88,6 +100,7 @@ async def update_tag(
     updated = await tags.update(property_id, tag_id, payload)
     if updated is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tag not found")
+    logger.info("Updated tag property_id=%s tag_id=%s", property_id, tag_id)
     return updated
 
 
@@ -108,6 +121,7 @@ async def delete_tag(
     for inst in tagged:
         inst.tag_ids = [t for t in inst.tag_ids if t != tag_id]
         await instances.replace(inst)
+    logger.info("Deleted tag property_id=%s tag_id=%s detached_instances=%s", property_id, tag_id, len(tagged))
 
 
 @router.post("/{tag_id}/apply", status_code=status.HTTP_204_NO_CONTENT)
@@ -123,6 +137,7 @@ async def apply_tag(
     await authorize(tenancy, property_id, user)
     if await tags.get(property_id, tag_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tag not found")
+    applied = 0
     for instance_id in payload.instance_ids:
         inst = await instances.get(property_id, instance_id)
         if inst is None:
@@ -130,6 +145,8 @@ async def apply_tag(
         if tag_id not in inst.tag_ids:
             inst.tag_ids.append(tag_id)
             await instances.replace(inst)
+            applied += 1
+    logger.info("Applied tag property_id=%s tag_id=%s instances=%s", property_id, tag_id, applied)
 
 
 @router.post("/{tag_id}/remove", status_code=status.HTTP_204_NO_CONTENT)
@@ -143,12 +160,15 @@ async def remove_tag_from_plants(
     user: CurrentUser = Depends(get_current_user),
 ):
     await authorize(tenancy, property_id, user)
+    removed = 0
     for instance_id in payload.instance_ids:
         inst = await instances.get(property_id, instance_id)
         if inst is None or tag_id not in inst.tag_ids:
             continue
         inst.tag_ids = [t for t in inst.tag_ids if t != tag_id]
         await instances.replace(inst)
+        removed += 1
+    logger.info("Removed tag from plants property_id=%s tag_id=%s instances=%s", property_id, tag_id, removed)
 
 
 @router.post("/{tag_id}/action")
@@ -172,4 +192,11 @@ async def run_tag_action(
         _apply_event(inst, event)
         await instances.replace(inst)
         affected += 1
+    logger.info(
+        "Ran tag action property_id=%s tag_id=%s action=%s affected=%s",
+        property_id,
+        tag_id,
+        payload.type,
+        affected,
+    )
     return {"affected": affected}

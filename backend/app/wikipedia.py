@@ -7,6 +7,7 @@ ready reference context for downstream LLM enrichment.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Any
 from urllib.parse import quote
 
@@ -15,6 +16,7 @@ from bs4 import BeautifulSoup
 
 
 _WIKIPEDIA_HEADERS = {"User-Agent": "plant-library/0.1"}
+logger = logging.getLogger("plantlibrary.wikipedia")
 
 
 @dataclass(slots=True)
@@ -35,12 +37,19 @@ class WikipediaClient:
         *,
         max_chars: int = 12000,
     ) -> WikipediaArticle | None:
+        logger.debug("Resolving Wikipedia article for query=%s", query)
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            return await self.resolve_article(
+            article = await self.resolve_article(
                 client,
                 query,
                 max_chars=max_chars,
             )
+        logger.debug(
+            "Wikipedia resolution complete query=%s found=%s",
+            query,
+            article is not None,
+        )
+        return article
 
     async def search_title(self, client: httpx.AsyncClient, query: str) -> str | None:
         query = query.strip()
@@ -62,8 +71,11 @@ class WikipediaClient:
         resp.raise_for_status()
         results = (resp.json().get("query") or {}).get("search") or []
         if not results:
+            logger.debug("No Wikipedia search result for query=%s", query)
             return None
-        return results[0].get("title")
+        title = results[0].get("title")
+        logger.debug("Wikipedia search resolved query=%s title=%s", query, title)
+        return title
 
     async def fetch_article(
         self,
@@ -90,6 +102,7 @@ class WikipediaClient:
         html = payload.get("text")
         page_title = payload.get("title") or title
         if not html:
+            logger.debug("Wikipedia page returned no HTML query=%s title=%s", query, title)
             return None
 
         soup = BeautifulSoup(html, "html.parser")
@@ -110,14 +123,22 @@ class WikipediaClient:
         text = soup.get_text("\n", strip=True)
         text = "\n".join(line for line in text.splitlines() if line.strip())
         if not text:
+            logger.debug("Wikipedia page returned no text query=%s title=%s", query, title)
             return None
 
-        return WikipediaArticle(
+        article = WikipediaArticle(
             query=query,
             title=page_title,
             url=f"https://en.wikipedia.org/wiki/{quote(page_title.replace(' ', '_'), safe='')}",
             text=text[:max_chars],
         )
+        logger.debug(
+            "Fetched Wikipedia article query=%s title=%s chars=%s",
+            query,
+            article.title,
+            len(article.text),
+        )
+        return article
 
     async def resolve_article(
         self,
@@ -166,6 +187,7 @@ class WikipediaClient:
         references: dict[str, WikipediaArticle] = {}
         lines: list[str] = []
         if not queries:
+            logger.debug("No Wikipedia candidate queries were generated")
             return "", references
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -184,6 +206,11 @@ class WikipediaClient:
                     f"Content:\n{article.text}"
                 )
 
+            logger.debug(
+                "Built Wikipedia reference context queries=%s matched=%s",
+                len(queries),
+                len(references),
+            )
         return "\n\n---\n\n".join(lines), references
 
 
@@ -200,6 +227,7 @@ def candidate_lookup_keys(candidate: Any) -> list[str]:
 
 
 def apply_reference_metadata(candidates: list[Any], references: dict[str, WikipediaArticle]) -> None:
+    applied = 0
     for candidate in candidates:
         for key in candidate_lookup_keys(candidate):
             article = references.get(key)
@@ -209,4 +237,10 @@ def apply_reference_metadata(candidates: list[Any], references: dict[str, Wikipe
                 setattr(candidate, "description", article.text[:1200])
             if not getattr(candidate, "reference_url", None):
                 setattr(candidate, "reference_url", article.url)
+            applied += 1
             break
+    logger.debug(
+        "Applied Wikipedia metadata to candidates matched=%s total=%s",
+        applied,
+        len(candidates),
+    )

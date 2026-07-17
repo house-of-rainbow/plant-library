@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -25,6 +26,7 @@ from ..repositories import (
 )
 
 router = APIRouter(prefix="/api/instances", tags=["instances"])
+logger = logging.getLogger("plantlibrary.routers.instances")
 
 
 async def _to_read(
@@ -38,6 +40,7 @@ async def _to_read(
     read.care_status = status_
     read.plant_class = plant_class
     read.scan_url = f"{settings.scan_base_url.rstrip('/')}/{instance.id}"
+    logger.debug("Built plant instance read model instance_id=%s property_id=%s", instance.id, instance.property_id)
     return read
 
 
@@ -57,7 +60,16 @@ async def list_instances(
     instances = await repo.list(
         property_id, garden_id=garden_id, class_id=class_id, tag_id=tag_id
     )
-    return [await _to_read(i, classes, settings) for i in instances]
+    result = [await _to_read(i, classes, settings) for i in instances]
+    logger.debug(
+        "Listed instances property_id=%s garden_id=%s class_id=%s tag_id=%s count=%s",
+        property_id,
+        garden_id,
+        class_id,
+        tag_id,
+        len(result),
+    )
+    return result
 
 
 @router.post("", response_model=PlantInstanceRead, status_code=status.HTTP_201_CREATED)
@@ -76,6 +88,7 @@ async def create_instance(
     if await tenancy.get_garden(property_id, payload.garden_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Referenced garden does not exist")
     created = await repo.create(property_id, payload)
+    logger.info("Created instance property_id=%s instance_id=%s", property_id, created.id)
     return await _to_read(created, classes, settings)
 
 
@@ -93,6 +106,7 @@ async def get_instance(
     instance = await repo.get(property_id, instance_id)
     if instance is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plant instance not found")
+    logger.debug("Fetched instance property_id=%s instance_id=%s", property_id, instance_id)
     return await _to_read(instance, classes, settings)
 
 
@@ -111,6 +125,7 @@ async def update_instance(
     updated = await repo.update(property_id, instance_id, payload)
     if updated is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plant instance not found")
+    logger.info("Updated instance property_id=%s instance_id=%s", property_id, instance_id)
     return await _to_read(updated, classes, settings)
 
 
@@ -125,6 +140,7 @@ async def delete_instance(
     await authorize(tenancy, property_id, user)
     if not await repo.delete(property_id, instance_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plant instance not found")
+    logger.info("Deleted instance property_id=%s instance_id=%s", property_id, instance_id)
 
 
 @router.post("/{instance_id}/events", response_model=PlantInstanceRead)
@@ -158,4 +174,10 @@ async def add_care_event(
         instance.health_status = event.new_health_status
 
     saved = await repo.replace(instance)
+    logger.info(
+        "Added care event property_id=%s instance_id=%s event_type=%s",
+        property_id,
+        instance_id,
+        event.type,
+    )
     return await _to_read(saved, classes, settings)

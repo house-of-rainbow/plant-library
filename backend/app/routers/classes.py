@@ -1,6 +1,8 @@
 """Plant class (species/taxon) CRUD endpoints — scoped to a property."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ..auth import CurrentUser, get_current_user
@@ -9,6 +11,7 @@ from ..models import PlantClass, PlantClassCreate, PlantClassUpdate
 from ..repositories import PlantClassRepository, TenancyRepository
 
 router = APIRouter(prefix="/api/classes", tags=["classes"])
+logger = logging.getLogger("plantlibrary.routers.classes")
 
 
 @router.get("", response_model=list[PlantClass])
@@ -19,7 +22,9 @@ async def list_classes(
     user: CurrentUser = Depends(get_current_user),
 ):
     await authorize(tenancy, property_id, user)
-    return await repo.list(property_id)
+    classes = await repo.list(property_id)
+    logger.debug("Listed classes property_id=%s count=%s", property_id, len(classes))
+    return classes
 
 
 @router.post("", response_model=PlantClass, status_code=status.HTTP_201_CREATED)
@@ -31,7 +36,9 @@ async def create_class(
     user: CurrentUser = Depends(get_current_user),
 ):
     await authorize(tenancy, property_id, user)
-    return await repo.create(property_id, payload)
+    entity = await repo.create(property_id, payload)
+    logger.info("Created class property_id=%s class_id=%s", property_id, entity.id)
+    return entity
 
 
 @router.get("/{class_id}", response_model=PlantClass)
@@ -46,6 +53,7 @@ async def get_class(
     entity = await repo.get(property_id, class_id)
     if entity is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plant class not found")
+    logger.debug("Fetched class property_id=%s class_id=%s", property_id, class_id)
     return entity
 
 
@@ -62,6 +70,7 @@ async def update_class(
     entity = await repo.update(property_id, class_id, payload)
     if entity is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plant class not found")
+    logger.info("Updated class property_id=%s class_id=%s", property_id, class_id)
     return entity
 
 
@@ -76,3 +85,4 @@ async def delete_class(
     await authorize(tenancy, property_id, user)
     if not await repo.delete(property_id, class_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plant class not found")
+    logger.info("Deleted class property_id=%s class_id=%s", property_id, class_id)

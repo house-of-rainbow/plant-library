@@ -182,7 +182,7 @@ var backendSecrets = concat(
 
 var backendBaseEnv = [
   { name: 'APP_ENV', value: environmentName }
-  { name: 'LOG_LEVEL', value: 'INFO' }
+  { name: 'LOG_LEVEL', value: 'DEBUG' }
   { name: 'CORS_ORIGINS', value: 'https://${frontendFqdn}' }
   { name: 'COSMOS_ENDPOINT', value: cosmos.properties.documentEndpoint }
   { name: 'COSMOS_KEY', secretRef: 'cosmos-key' }

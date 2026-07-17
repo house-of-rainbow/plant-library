@@ -8,6 +8,7 @@ document types (``property``, ``garden``, ``membership``, ``tag``) by a
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from datetime import timedelta
 from datetime import datetime, timezone
@@ -39,6 +40,8 @@ from .models import (
     _norm_email,
     new_membership_id,
 )
+
+logger = logging.getLogger("plantlibrary.repositories")
 
 
 def _now() -> datetime:
@@ -100,6 +103,7 @@ class TenancyRepository:
             role=MemberRole.owner,
         )
         await self._c.create_item(body=owner.model_dump(mode="json"))
+        logger.info("Created property property_id=%s owner_oid=%s", entity.id, owner_oid)
         return entity
 
     async def get_property(self, property_id: str) -> Property | None:
@@ -113,7 +117,9 @@ class TenancyRepository:
 
     async def list_all_properties(self) -> list[Property]:
         query = "SELECT * FROM c WHERE c.doc_type = 'property' ORDER BY c.created_at ASC"
-        return [Property(**i) async for i in self._c.query_items(query=query)]
+        items = [Property(**i) async for i in self._c.query_items(query=query)]
+        logger.debug("Listed all properties count=%s", len(items))
+        return items
 
     async def update_property(
         self, property_id: str, payload: PropertyUpdate
@@ -126,6 +132,7 @@ class TenancyRepository:
         data["updated_at"] = _now()
         updated = Property(**data)
         await self._c.replace_item(item=property_id, body=updated.model_dump(mode="json"))
+        logger.info("Updated property property_id=%s", property_id)
         return updated
 
     async def delete_property(self, property_id: str) -> bool:
@@ -135,11 +142,14 @@ class TenancyRepository:
             return False
         query = "SELECT c.id FROM c WHERE c.property_id = @pid"
         params = [{"name": "@pid", "value": property_id}]
+        deleted_count = 0
         async for row in self._c.query_items(query=query, parameters=params):
             try:
                 await self._c.delete_item(item=row["id"], partition_key=property_id)
+                deleted_count += 1
             except CosmosResourceNotFoundError:
                 pass
+        logger.info("Deleted property partition property_id=%s docs=%s", property_id, deleted_count)
         return True
 
     async def list_properties_for_user(
@@ -162,6 +172,7 @@ class TenancyRepository:
             prop = await self.get_property(m.property_id)
             if prop is not None:
                 result.append((prop, m.role))
+        logger.debug("Listed properties for user user_oid=%s count=%s", oid, len(result))
         return result
 
     async def _memberships_for_user(
@@ -182,6 +193,12 @@ class TenancyRepository:
                 m.user_oid = oid
                 m.updated_at = _now()
                 await self._c.replace_item(item=m.id, body=m.model_dump(mode="json"))
+                logger.info(
+                    "Claimed invited membership property_id=%s member_id=%s user_oid=%s",
+                    m.property_id,
+                    m.id,
+                    oid,
+                )
             found.append(m)
         return found
 
@@ -215,10 +232,12 @@ class TenancyRepository:
             "ORDER BY c.created_at ASC"
         )
         params = [{"name": "@pid", "value": property_id}]
-        return [
+        items = [
             Membership(**i)
             async for i in self._c.query_items(query=query, parameters=params)
         ]
+        logger.debug("Listed members property_id=%s count=%s", property_id, len(items))
+        return items
 
     async def find_member_by_email(
         self, property_id: str, email: str
@@ -239,6 +258,12 @@ class TenancyRepository:
             role=role,
         )
         await self._c.create_item(body=entity.model_dump(mode="json"))
+        logger.info(
+            "Added member property_id=%s member_id=%s role=%s",
+            property_id,
+            entity.id,
+            role,
+        )
         return entity
 
     async def get_member(self, property_id: str, member_id: str) -> Membership | None:
@@ -259,6 +284,12 @@ class TenancyRepository:
         current.role = role
         current.updated_at = _now()
         await self._c.replace_item(item=member_id, body=current.model_dump(mode="json"))
+        logger.info(
+            "Updated member role property_id=%s member_id=%s role=%s",
+            property_id,
+            member_id,
+            role,
+        )
         return current
 
     async def remove_member(self, property_id: str, member_id: str) -> bool:
@@ -266,6 +297,7 @@ class TenancyRepository:
             await self._c.delete_item(item=member_id, partition_key=property_id)
         except CosmosResourceNotFoundError:
             return False
+        logger.info("Removed member property_id=%s member_id=%s", property_id, member_id)
         return True
 
     # ---- gardens ---- #
@@ -275,14 +307,17 @@ class TenancyRepository:
             "ORDER BY c.created_at ASC"
         )
         params = [{"name": "@pid", "value": property_id}]
-        return [
+        items = [
             Garden(**i)
             async for i in self._c.query_items(query=query, parameters=params)
         ]
+        logger.debug("Listed gardens property_id=%s count=%s", property_id, len(items))
+        return items
 
     async def create_garden(self, property_id: str, payload: GardenCreate) -> Garden:
         entity = Garden(property_id=property_id, **payload.model_dump())
         await self._c.create_item(body=entity.model_dump(mode="json"))
+        logger.info("Created garden property_id=%s garden_id=%s", property_id, entity.id)
         return entity
 
     async def get_garden(self, property_id: str, garden_id: str) -> Garden | None:
@@ -305,6 +340,7 @@ class TenancyRepository:
         data["updated_at"] = _now()
         updated = Garden(**data)
         await self._c.replace_item(item=garden_id, body=updated.model_dump(mode="json"))
+        logger.info("Updated garden property_id=%s garden_id=%s", property_id, garden_id)
         return updated
 
     async def delete_garden(self, property_id: str, garden_id: str) -> bool:
@@ -312,6 +348,7 @@ class TenancyRepository:
             await self._c.delete_item(item=garden_id, partition_key=property_id)
         except CosmosResourceNotFoundError:
             return False
+        logger.info("Deleted garden property_id=%s garden_id=%s", property_id, garden_id)
         return True
 
 
@@ -339,6 +376,7 @@ class PersonalAccessTokenRepository:
         token = _build_pat_value(entity.id, secret)
         entity.token_hash = _hash_pat(token)
         await self._c.create_item(body=entity.model_dump(mode="json"))
+        logger.info("Created personal access token token_id=%s user_oid=%s", entity.id, user_oid)
         return entity, token
 
     async def list_for_user(self, user_oid: str) -> list[PersonalAccessToken]:
@@ -347,10 +385,12 @@ class PersonalAccessTokenRepository:
             "AND c.user_oid = @oid ORDER BY c.created_at DESC"
         )
         params = [{"name": "@oid", "value": user_oid}]
-        return [
+        items = [
             PersonalAccessToken(**i)
             async for i in self._c.query_items(query=query, parameters=params)
         ]
+        logger.debug("Listed personal access tokens user_oid=%s count=%s", user_oid, len(items))
+        return items
 
     async def get_for_user(
         self, user_oid: str, token_id: str
@@ -371,11 +411,13 @@ class PersonalAccessTokenRepository:
         if current is None:
             return False
         await self._c.delete_item(item=token_id, partition_key=token_id)
+        logger.info("Revoked personal access token token_id=%s user_oid=%s", token_id, user_oid)
         return True
 
     async def authenticate(self, token: str) -> PersonalAccessToken | None:
         parsed = _parse_pat(token)
         if parsed is None:
+            logger.debug("Skipped PAT authentication for invalid token prefix")
             return None
         token_id, _secret = parsed
         try:
@@ -387,8 +429,10 @@ class PersonalAccessTokenRepository:
 
         entity = PersonalAccessToken(**item)
         if entity.expires_at <= _now():
+            logger.info("Rejected expired personal access token token_id=%s", token_id)
             return None
         if not secrets.compare_digest(entity.token_hash, _hash_pat(token)):
+            logger.debug("Rejected personal access token hash mismatch token_id=%s", token_id)
             return None
         if (
             entity.last_used_at is None
@@ -399,6 +443,7 @@ class PersonalAccessTokenRepository:
             await self._c.replace_item(
                 item=entity.id, body=entity.model_dump(mode="json")
             )
+        logger.info("Authenticated personal access token token_id=%s user_oid=%s", token_id, entity.user_oid)
         return entity
 
 # --------------------------------------------------------------------------- #
@@ -423,9 +468,17 @@ class TagRepository:
             query += " AND c.scope = @scope"
             params.append({"name": "@scope", "value": scope.value})
         query += " ORDER BY c.name ASC"
-        return [
+        items = [
             Tag(**i) async for i in self._c.query_items(query=query, parameters=params)
         ]
+        logger.debug(
+            "Listed tags property_id=%s garden_id=%s scope=%s count=%s",
+            property_id,
+            garden_id,
+            scope,
+            len(items),
+        )
+        return items
 
     async def get(self, property_id: str, tag_id: str) -> Tag | None:
         try:
@@ -439,6 +492,7 @@ class TagRepository:
     async def create(self, property_id: str, payload: TagCreate) -> Tag:
         entity = Tag(property_id=property_id, **payload.model_dump())
         await self._c.create_item(body=entity.model_dump(mode="json"))
+        logger.info("Created tag property_id=%s tag_id=%s", property_id, entity.id)
         return entity
 
     async def update(
@@ -452,6 +506,7 @@ class TagRepository:
         data["updated_at"] = _now()
         updated = Tag(**data)
         await self._c.replace_item(item=tag_id, body=updated.model_dump(mode="json"))
+        logger.info("Updated tag property_id=%s tag_id=%s", property_id, tag_id)
         return updated
 
     async def delete(self, property_id: str, tag_id: str) -> bool:
@@ -459,6 +514,7 @@ class TagRepository:
             await self._c.delete_item(item=tag_id, partition_key=property_id)
         except CosmosResourceNotFoundError:
             return False
+        logger.info("Deleted tag property_id=%s tag_id=%s", property_id, tag_id)
         return True
 
 
@@ -476,7 +532,9 @@ class PlantClassRepository:
         )
         params = [{"name": "@pid", "value": property_id}]
         items = [i async for i in self._c.query_items(query=query, parameters=params)]
-        return [PlantClass(**i) for i in items]
+        result = [PlantClass(**i) for i in items]
+        logger.debug("Listed plant classes property_id=%s count=%s", property_id, len(result))
+        return result
 
     async def get(self, property_id: str, class_id: str) -> PlantClass | None:
         try:
@@ -490,6 +548,7 @@ class PlantClassRepository:
     async def create(self, property_id: str, payload: PlantClassCreate) -> PlantClass:
         entity = PlantClass(property_id=property_id, **payload.model_dump())
         await self._c.create_item(body=entity.model_dump(mode="json"))
+        logger.info("Created plant class property_id=%s class_id=%s", property_id, entity.id)
         return entity
 
     async def update(
@@ -503,6 +562,7 @@ class PlantClassRepository:
         data["updated_at"] = _now()
         updated = PlantClass(**data)
         await self._c.replace_item(item=class_id, body=updated.model_dump(mode="json"))
+        logger.info("Updated plant class property_id=%s class_id=%s", property_id, class_id)
         return updated
 
     async def delete(self, property_id: str, class_id: str) -> bool:
@@ -510,6 +570,7 @@ class PlantClassRepository:
             await self._c.delete_item(item=class_id, partition_key=property_id)
         except CosmosResourceNotFoundError:
             return False
+        logger.info("Deleted plant class property_id=%s class_id=%s", property_id, class_id)
         return True
 
 
@@ -540,7 +601,16 @@ class PlantInstanceRepository:
             params.append({"name": "@tid", "value": tag_id})
         query += " ORDER BY c.created_at DESC"
         items = [i async for i in self._c.query_items(query=query, parameters=params)]
-        return [PlantInstance(**i) for i in items]
+        result = [PlantInstance(**i) for i in items]
+        logger.debug(
+            "Listed plant instances property_id=%s garden_id=%s class_id=%s tag_id=%s count=%s",
+            property_id,
+            garden_id,
+            class_id,
+            tag_id,
+            len(result),
+        )
+        return result
 
     async def get(self, property_id: str, instance_id: str) -> PlantInstance | None:
         try:
@@ -556,7 +626,13 @@ class PlantInstanceRepository:
         query = "SELECT * FROM c WHERE c.id = @id AND c.doc_type = 'plant_instance'"
         params = [{"name": "@id", "value": instance_id}]
         async for item in self._c.query_items(query=query, parameters=params):
-            return PlantInstance(**item)
+            instance = PlantInstance(**item)
+            logger.debug(
+                "Resolved plant instance by global id instance_id=%s property_id=%s",
+                instance_id,
+                instance.property_id,
+            )
+            return instance
         return None
 
     async def create(
@@ -564,6 +640,7 @@ class PlantInstanceRepository:
     ) -> PlantInstance:
         entity = PlantInstance(property_id=property_id, **payload.model_dump())
         await self._c.create_item(body=entity.model_dump(mode="json"))
+        logger.info("Created plant instance property_id=%s instance_id=%s", property_id, entity.id)
         return entity
 
     async def update(
@@ -578,11 +655,13 @@ class PlantInstanceRepository:
         updated = PlantInstance(**data)
         updated.property_id = property_id
         await self._c.replace_item(item=instance_id, body=updated.model_dump(mode="json"))
+        logger.info("Updated plant instance property_id=%s instance_id=%s", property_id, instance_id)
         return updated
 
     async def replace(self, entity: PlantInstance) -> PlantInstance:
         entity.updated_at = _now()
         await self._c.replace_item(item=entity.id, body=entity.model_dump(mode="json"))
+        logger.info("Replaced plant instance property_id=%s instance_id=%s", entity.property_id, entity.id)
         return entity
 
     async def delete(self, property_id: str, instance_id: str) -> bool:
@@ -590,4 +669,5 @@ class PlantInstanceRepository:
             await self._c.delete_item(item=instance_id, partition_key=property_id)
         except CosmosResourceNotFoundError:
             return False
+        logger.info("Deleted plant instance property_id=%s instance_id=%s", property_id, instance_id)
         return True

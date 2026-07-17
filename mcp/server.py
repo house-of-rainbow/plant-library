@@ -9,8 +9,15 @@ Reuses the backend's data layer (``app.*``) so behaviour matches the REST API.
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
+
+SOURCE_BACKEND = Path(__file__).resolve().parents[1] / "backend"
+if SOURCE_BACKEND.exists():
+    sys.path.insert(0, str(SOURCE_BACKEND))
 
 from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, TokenVerifier
@@ -43,6 +50,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("plantlibrary.mcp")
 
 settings = get_settings()
+MCP_HOST = os.getenv("MCP_HOST", "0.0.0.0")
+MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
+MCP_PATH = os.getenv("MCP_PATH", "/mcp/")
 
 
 class PersonalAccessTokenVerifier(TokenVerifier):
@@ -61,7 +71,7 @@ class PersonalAccessTokenVerifier(TokenVerifier):
             token=token,
             client_id=pat.user_oid,
             scopes=[],
-            expires_at=pat.expires_at.timestamp(),
+            expires_at=int(pat.expires_at.timestamp()),
             claims=claims,
         )
 
@@ -331,4 +341,4 @@ async def care_dashboard(property_id: str, garden_id: str | None = None) -> dict
 
 
 if __name__ == "__main__":
-    mcp.run(transport="http", host="0.0.0.0", port=8000, path="/mcp/")
+    mcp.run(transport="http", host=MCP_HOST, port=MCP_PORT, path=MCP_PATH)

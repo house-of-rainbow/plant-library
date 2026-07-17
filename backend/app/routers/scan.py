@@ -7,6 +7,7 @@ companion endpoint returns a printable QR code PNG for a given instance.
 from __future__ import annotations
 
 import io
+import logging
 
 import qrcode
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -24,6 +25,7 @@ from ..repositories import (
 from .instances import _to_read
 
 router = APIRouter(prefix="/api/scan", tags=["scan"])
+logger = logging.getLogger("plantlibrary.routers.scan")
 
 
 @router.get("/{plant_id}", response_model=PlantInstanceRead)
@@ -40,6 +42,7 @@ async def resolve_scan(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No plant matches that label")
     # Only members of the plant's property may resolve its label.
     await authorize(tenancy, instance.property_id, user)
+    logger.debug("Resolved scan plant_id=%s property_id=%s", plant_id, instance.property_id)
     return await _to_read(instance, classes, settings)
 
 
@@ -61,4 +64,5 @@ async def qr_code(
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
+    logger.info("Generated QR code plant_id=%s property_id=%s", plant_id, instance.property_id)
     return StreamingResponse(buf, media_type="image/png")

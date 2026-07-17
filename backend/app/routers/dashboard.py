@@ -1,6 +1,8 @@
 """Dashboard summary: care due/overdue aggregation for the Operations view."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Query
 
 from ..auth import CurrentUser, get_current_user
@@ -16,6 +18,7 @@ from ..repositories import (
 from .instances import _to_read
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+logger = logging.getLogger("plantlibrary.routers.dashboard")
 
 
 @router.get("/summary")
@@ -49,7 +52,7 @@ async def summary(
         if inst.health_status.value in {"struggling", "critical"}:
             needs_attention.append(read)
 
-    return {
+    summary = {
         "total_plants": total,
         "total_species": len(all_classes),
         "watering_overdue_count": len(watering_overdue),
@@ -59,3 +62,13 @@ async def summary(
         "watering_due_soon": watering_due_soon,
         "needs_attention": needs_attention,
     }
+    logger.debug(
+        "Built dashboard summary property_id=%s garden_id=%s plants=%s overdue=%s due_soon=%s attention=%s",
+        property_id,
+        garden_id,
+        total,
+        len(watering_overdue),
+        len(watering_due_soon),
+        len(needs_attention),
+    )
+    return summary

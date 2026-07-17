@@ -6,9 +6,12 @@ Secrets are never hard-coded; everything is sourced from the environment
 from __future__ import annotations
 
 from functools import lru_cache
+import logging
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("plantlibrary.config")
 
 
 class Settings(BaseSettings):
@@ -71,4 +74,12 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Return a cached Settings singleton."""
-    return Settings()
+    settings = Settings()
+    logger.debug(
+        "Loaded settings app_env=%s log_level=%s auth_disabled=%s cors_origins=%s",
+        settings.app_env,
+        settings.log_level,
+        settings.auth_disabled,
+        len(settings.cors_origins_list),
+    )
+    return settings

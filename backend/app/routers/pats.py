@@ -1,6 +1,8 @@
 """Personal access token management for the current user."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..auth import CurrentUser, get_current_user
@@ -12,6 +14,7 @@ from ..models import (
 from ..repositories import PersonalAccessTokenRepository
 
 router = APIRouter(prefix="/api/auth/pats", tags=["personal-access-tokens"])
+logger = logging.getLogger("plantlibrary.routers.pats")
 
 
 @router.get("", response_model=list[str])
@@ -20,6 +23,7 @@ async def list_personal_access_tokens(
     user: CurrentUser = Depends(get_current_user),
 ):
     tokens = await repo.list_for_user(user.oid)
+    logger.debug("Listed PAT ids for user user_oid=%s count=%s", user.oid, len(tokens))
     return [token.id for token in tokens]
 
 
@@ -32,6 +36,7 @@ async def create_personal_access_token(
     user: CurrentUser = Depends(get_current_user),
 ):
     token, plaintext = await repo.create(user.oid, user.email, user.name, payload)
+    logger.info("Created PAT token_id=%s user_oid=%s", token.id, user.oid)
     return PersonalAccessTokenCreated(
         id=token.id,
         name=token.name,
@@ -51,3 +56,4 @@ async def revoke_personal_access_token(
 ):
     if not await repo.revoke(user.oid, token_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Token not found")
+    logger.info("Revoked PAT token_id=%s user_oid=%s", token_id, user.oid)

@@ -3,6 +3,7 @@ derives watering/fertilizing due dates and overdue flags.
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 from .models import (
@@ -11,6 +12,8 @@ from .models import (
     PlantClass,
     PlantInstance,
 )
+
+logger = logging.getLogger("plantlibrary.care")
 
 
 def _merge_field(instance_val, class_val):
@@ -29,6 +32,11 @@ def effective_care(instance: PlantInstance, plant_class: PlantClass | None) -> C
         field: _merge_field(getattr(overrides, field), getattr(defaults, field))
         for field in CareDefaults.model_fields
     }
+    logger.debug(
+        "Merged care defaults for instance=%s class=%s",
+        instance.id,
+        plant_class.id if plant_class else None,
+    )
     return CareDefaults(**merged)
 
 
@@ -53,7 +61,7 @@ def compute_care_status(
         instance.last_fertilized_at, care.fertilizing_interval_days
     )
 
-    return CareStatus(
+    status = CareStatus(
         watering_next_due=watering_due,
         watering_overdue=watering_overdue,
         days_until_watering=days_until,
@@ -61,3 +69,11 @@ def compute_care_status(
         fertilizing_overdue=fert_overdue,
         effective_care=care,
     )
+    logger.debug(
+        "Computed care status for instance=%s watering_due=%s fertilizing_due=%s overdue=%s",
+        instance.id,
+        watering_due,
+        fert_due,
+        watering_overdue or fert_overdue,
+    )
+    return status

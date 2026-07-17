@@ -9,12 +9,15 @@ Design:
 """
 from __future__ import annotations
 
+import logging
 import secrets
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
+
+logger = logging.getLogger("plantlibrary.models")
 
 
 # --------------------------------------------------------------------------- #
@@ -101,7 +104,10 @@ def new_personal_access_token_id() -> str:
 
 
 def _norm_email(email: str) -> str:
-    return email.strip().lower()
+    normalized = email.strip().lower()
+    if normalized != email:
+        logger.debug("Normalized email input")
+    return normalized
 
 
 # --------------------------------------------------------------------------- #

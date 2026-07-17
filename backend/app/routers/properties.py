@@ -6,6 +6,8 @@ plants (and tags) only.
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
 
@@ -29,6 +31,7 @@ from ..repositories import TenancyRepository
 from ..storage import BlobStorage, get_storage
 
 router = APIRouter(prefix="/api/properties", tags=["properties"])
+logger = logging.getLogger("plantlibrary.routers.properties")
 
 _MAX_SCENE_BYTES = 100 * 1024 * 1024
 
@@ -51,7 +54,9 @@ async def list_properties(
     user: CurrentUser = Depends(get_current_user),
 ):
     pairs = await tenancy.list_properties_for_user(user.oid, user.email)
-    return [await _to_read(p, role, tenancy) for p, role in pairs]
+    result = [await _to_read(p, role, tenancy) for p, role in pairs]
+    logger.debug("Listed properties for user user_oid=%s count=%s", user.oid, len(result))
+    return result
 
 
 @router.post("", response_model=PropertyRead, status_code=status.HTTP_201_CREATED)
@@ -68,6 +73,7 @@ async def create_property(
         await tenancy.create_garden(
             prop.id, GardenCreate(name=payload.home_garden_name, is_home=True)
         )
+    logger.info("Created property property_id=%s owner_oid=%s", prop.id, user.oid)
     return await _to_read(prop, MemberRole.owner, tenancy)
 
 
@@ -80,6 +86,7 @@ async def get_property(
     membership = await authorize(tenancy, property_id, user)
     prop = await tenancy.get_property(property_id)
     assert prop is not None  # authorize() already verified existence
+    logger.debug("Fetched property property_id=%s user_oid=%s", property_id, user.oid)
     return await _to_read(prop, membership.role, tenancy)
 
 
@@ -94,6 +101,7 @@ async def update_property(
     updated = await tenancy.update_property(property_id, payload)
     if updated is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Property not found")
+    logger.info("Updated property property_id=%s", property_id)
     return await _to_read(updated, MemberRole.owner, tenancy)
 
 
@@ -105,6 +113,7 @@ async def delete_property(
 ):
     await authorize(tenancy, property_id, user, require_owner=True)
     await tenancy.delete_property(property_id)
+    logger.info("Deleted property property_id=%s", property_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -117,7 +126,9 @@ async def list_gardens(
     user: CurrentUser = Depends(get_current_user),
 ):
     await authorize(tenancy, property_id, user)
-    return await tenancy.list_gardens(property_id)
+    gardens = await tenancy.list_gardens(property_id)
+    logger.debug("Listed gardens property_id=%s count=%s", property_id, len(gardens))
+    return gardens
 
 
 @router.post(
@@ -130,7 +141,9 @@ async def create_garden(
     user: CurrentUser = Depends(get_current_user),
 ):
     await authorize(tenancy, property_id, user, require_owner=True)
-    return await tenancy.create_garden(property_id, payload)
+    garden = await tenancy.create_garden(property_id, payload)
+    logger.info("Created garden property_id=%s garden_id=%s", property_id, garden.id)
+    return garden
 
 
 @router.patch("/{property_id}/gardens/{garden_id}", response_model=Garden)
@@ -145,6 +158,7 @@ async def update_garden(
     updated = await tenancy.update_garden(property_id, garden_id, payload)
     if updated is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Garden not found")
+    logger.info("Updated garden property_id=%s garden_id=%s", property_id, garden_id)
     return updated
 
 
@@ -164,13 +178,16 @@ async def upload_garden_scene(
 
     data = await file.read()
     if len(data) > _MAX_SCENE_BYTES:
+        logger.warning("Rejected garden scene upload property_id=%s garden_id=%s bytes=%s", property_id, garden_id, len(data))
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Scene file too large")
 
     try:
         url = await storage.upload_garden_scene(data, file.content_type or "", file.filename)
     except ValueError as exc:
+        logger.warning("Rejected garden scene upload property_id=%s garden_id=%s reason=%s", property_id, garden_id, exc)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except RuntimeError as exc:
+        logger.warning("Garden scene upload unavailable property_id=%s garden_id=%s", property_id, garden_id)
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
     updated = await tenancy.update_garden(
@@ -181,6 +198,13 @@ async def upload_garden_scene(
         ),
     )
     assert updated is not None
+    logger.info(
+        "Uploaded garden scene property_id=%s garden_id=%s filename=%s bytes=%s",
+        property_id,
+        garden_id,
+        file.filename,
+        len(data),
+    )
     return updated
 
 
@@ -208,6 +232,7 @@ async def get_garden_scene(
     except RuntimeError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
+    logger.debug("Downloaded garden scene property_id=%s garden_id=%s", property_id, garden_id)
     return Response(content=data, media_type=content_type)
 
 
@@ -223,6 +248,7 @@ async def delete_garden(
     await authorize(tenancy, property_id, user, require_owner=True)
     if not await tenancy.delete_garden(property_id, garden_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Garden not found")
+    logger.info("Deleted garden property_id=%s garden_id=%s", property_id, garden_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -235,7 +261,9 @@ async def list_members(
     user: CurrentUser = Depends(get_current_user),
 ):
     await authorize(tenancy, property_id, user)
-    return await tenancy.list_members(property_id)
+    members = await tenancy.list_members(property_id)
+    logger.debug("Listed members property_id=%s count=%s", property_id, len(members))
+    return members
 
 
 @router.post(
@@ -255,7 +283,9 @@ async def add_member(
         raise HTTPException(
             status.HTTP_409_CONFLICT, "That person is already a member of this property"
         )
-    return await tenancy.add_member(property_id, payload.email, payload.role)
+    member = await tenancy.add_member(property_id, payload.email, payload.role)
+    logger.info("Added member property_id=%s member_id=%s", property_id, member.id)
+    return member
 
 
 @router.patch("/{property_id}/members/{member_id}", response_model=Membership)
@@ -276,6 +306,7 @@ async def update_member_role(
             status.HTTP_400_BAD_REQUEST, "The property owner's role cannot be changed"
         )
     updated = await tenancy.update_member_role(property_id, member_id, payload.role)
+    logger.info("Updated member role property_id=%s member_id=%s role=%s", property_id, member_id, payload.role)
     return updated
 
 
@@ -298,3 +329,4 @@ async def remove_member(
             status.HTTP_400_BAD_REQUEST, "The property owner cannot be removed"
         )
     await tenancy.remove_member(property_id, member_id)
+    logger.info("Removed member property_id=%s member_id=%s", property_id, member_id)
