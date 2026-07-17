@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     # App
     app_env: str = "development"
-    log_level: str = "INFO"
+    log_level: str = "DEBUG"
     cors_origins: str = "http://localhost:5173"
 
     # Cosmos DB
